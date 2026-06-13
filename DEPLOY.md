@@ -2,12 +2,26 @@
 
 ## 📦 上传到 GitHub
 
-### 1. 初始化 Git 仓库
+### 1. 初始化 Git 仓库（重要）
 
 ```bash
+# 初始化 Git
 git init
 git add .
 git commit -m "Initial commit: 划词AI翻译工具"
+```
+
+**⚠️ 重要：生成 package-lock.json**
+
+GitHub Actions 需要完整的 package-lock.json 才能构建。请在推送前执行：
+
+```bash
+# 安装依赖（会生成完整的 package-lock.json）
+npm install
+
+# 提交 package-lock.json
+git add package-lock.json
+git commit -m "Add complete package-lock.json"
 ```
 
 ### 2. 创建 GitHub 仓库

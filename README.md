@@ -120,6 +120,20 @@
 - Rust 1.70+
 - Windows 10/11
 
+### 首次初始化（推送到 GitHub 前）
+
+如果你要推送到 GitHub 让 Actions 自动构建，先生成完整的 package-lock.json：
+
+```bash
+# 安装依赖（会生成完整的 package-lock.json）
+npm install
+
+# 提交更新后的 package-lock.json
+git add package-lock.json
+git commit -m "Add package-lock.json"
+git push
+```
+
 ### 安装依赖
 
 ```bash
