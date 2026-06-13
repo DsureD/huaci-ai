@@ -3,10 +3,10 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
 
-  let selectedText = '';
-  let translatedText = '';
-  let isLoading = false;
-  let showWindow = false;
+  let selectedText: string = '';
+  let translatedText: string = '';
+  let isLoading: boolean = false;
+  let showWindow: boolean = false;
 
   onMount(async () => {
     // 监听划词事件
