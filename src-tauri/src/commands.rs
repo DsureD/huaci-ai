@@ -1,7 +1,7 @@
 use crate::{api_manager, clipboard, config, mouse_hook};
 use std::sync::Mutex;
 use std::time::Duration;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, PhysicalPosition, State, WebviewUrl, WebviewWindowBuilder};
 
 // 全局配置状态
 pub struct AppState {
@@ -74,4 +74,49 @@ pub fn toggle_capture(enabled: bool) -> Result<bool, String> {
 #[tauri::command]
 pub fn get_capture_status() -> Result<bool, String> {
     Ok(mouse_hook::is_capture_enabled())
+}
+
+// 在指定屏幕坐标附近显示悬浮翻译窗口
+#[tauri::command]
+pub fn show_popup(app: AppHandle, x: i32, y: i32) -> Result<(), String> {
+    if let Some(win) = app.get_webview_window("main") {
+        // 让窗口出现在鼠标右下方，避免遮住选中文字
+        let _ = win.set_position(PhysicalPosition::new(x + 12, y + 12));
+        win.show().map_err(|e| e.to_string())?;
+        let _ = win.set_always_on_top(true);
+        let _ = win.set_focus();
+    }
+    Ok(())
+}
+
+// 隐藏悬浮翻译窗口
+#[tauri::command]
+pub fn hide_popup(app: AppHandle) -> Result<(), String> {
+    if let Some(win) = app.get_webview_window("main") {
+        win.hide().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+// 打开（或聚焦）设置窗口
+#[tauri::command]
+pub fn open_settings(app: AppHandle) -> Result<(), String> {
+    if let Some(win) = app.get_webview_window("settings") {
+        let _ = win.show();
+        let _ = win.set_focus();
+        return Ok(());
+    }
+
+    WebviewWindowBuilder::new(
+        &app,
+        "settings",
+        WebviewUrl::App("index.html?view=settings".into()),
+    )
+    .title("划词AI - 设置")
+    .inner_size(560.0, 640.0)
+    .resizable(true)
+    .center()
+    .build()
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }

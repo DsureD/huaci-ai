@@ -11,9 +11,9 @@ mod translator;
 use commands::AppState;
 use std::sync::Mutex;
 use tauri::{
-    menu::{Menu, MenuItem},
+    menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager,
+    Manager, WebviewUrl, WebviewWindowBuilder,
 };
 
 fn main() {
@@ -30,43 +30,71 @@ fn main() {
             config: Mutex::new(app_config),
         })
         .setup(|app| {
-            // 隐藏主窗口（只用于悬浮翻译）
+            // 隐藏主窗口（仅用于划词悬浮翻译）
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.hide();
             }
 
             // 创建托盘菜单
-            let toggle_item = MenuItem::with_id(app, "toggle", "启用划词监听", true, None::<&str>)?;
+            let toggle_item =
+                MenuItem::with_id(app, "toggle", "禁用划词监听", true, None::<&str>)?;
+            let settings_item =
+                MenuItem::with_id(app, "settings", "设置", true, None::<&str>)?;
+            let sep = PredefinedMenuItem::separator(app)?;
             let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
 
-            let menu = Menu::with_items(app, &[&toggle_item, &quit_item])?;
+            let menu =
+                Menu::with_items(app, &[&toggle_item, &settings_item, &sep, &quit_item])?;
 
-            // 创建托盘图标
-            let _tray = TrayIconBuilder::new()
+            // 把可变菜单项交给闭包持有，便于动态更新文字
+            let toggle_handle = toggle_item.clone();
+
+            // 创建托盘图标（复用应用图标，避免出现“透明无图标”的托盘）
+            let mut tray_builder = TrayIconBuilder::new()
+                .tooltip("划词AI")
                 .menu(&menu)
-                .on_menu_event(|app, event| match event.id().as_ref() {
+                .on_menu_event(move |app, event| match event.id().as_ref() {
                     "toggle" => {
                         let current = mouse_hook::is_capture_enabled();
                         mouse_hook::set_capture_enabled(!current);
-                        println!("划词监听: {}", if !current { "已启用" } else { "已禁用" });
+                        // 更新菜单文字
+                        let _ = toggle_handle.set_text(if !current {
+                            "禁用划词监听"
+                        } else {
+                            "启用划词监听"
+                        });
+                    }
+                    "settings" => {
+                        open_settings_window(app);
                     }
                     "quit" => {
-                        let _ = mouse_hook::uninstall_mouse_hook();
                         app.exit(0);
                     }
                     _ => {}
                 })
-                .on_tray_icon_event(|_tray, event| {
-                    if let TrayIconEvent::Click {
+                .on_tray_icon_event(|tray, event| {
+                    // 左键双击托盘打开设置
+                    if let TrayIconEvent::DoubleClick {
                         button: MouseButton::Left,
+                        ..
+                    } = event
+                    {
+                        open_settings_window(tray.app_handle());
+                    } else if let TrayIconEvent::Click {
+                        button: MouseButton::Right,
                         button_state: MouseButtonState::Up,
                         ..
                     } = event
                     {
-                        println!("托盘图标被点击");
+                        // 右键由菜单处理
                     }
-                })
-                .build(app)?;
+                });
+
+            if let Some(icon) = app.default_window_icon() {
+                tray_builder = tray_builder.icon(icon.clone());
+            }
+
+            let _tray = tray_builder.build(app)?;
 
             // 安装全局鼠标钩子
             if let Err(e) = mouse_hook::install_mouse_hook(app.handle().clone()) {
@@ -83,7 +111,30 @@ fn main() {
             commands::load_config,
             commands::toggle_capture,
             commands::get_capture_status,
+            commands::show_popup,
+            commands::hide_popup,
+            commands::open_settings,
         ])
         .run(tauri::generate_context!())
         .expect("运行 Tauri 应用时出错");
+}
+
+// 打开（或聚焦）设置窗口
+fn open_settings_window(app: &tauri::AppHandle) {
+    if let Some(win) = app.get_webview_window("settings") {
+        let _ = win.show();
+        let _ = win.set_focus();
+        return;
+    }
+
+    let _ = WebviewWindowBuilder::new(
+        app,
+        "settings",
+        WebviewUrl::App("index.html?view=settings".into()),
+    )
+    .title("划词AI - 设置")
+    .inner_size(560.0, 640.0)
+    .resizable(true)
+    .center()
+    .build();
 }
