@@ -2,50 +2,66 @@
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
+  import { getCurrentWindow } from '@tauri-apps/api/window';
   import Settings from './Settings.svelte';
 
-  // 通过 URL 参数区分窗口：?view=settings 为设置窗，其余为划词悬浮窗
   const view = new URLSearchParams(window.location.search).get('view');
   const isSettings = view === 'settings';
 
   let selectedText = '';
-  let translatedText = '';
+  let mode: 'toolbar' | 'result' = 'toolbar'; // toolbar=工具条, result=翻译结果
+  let resultText = '';
   let isLoading = false;
+  let currentAction: 'translate' | 'explain' = 'translate';
 
   onMount(async () => {
     if (isSettings) return;
 
-    // 监听划词事件，事件负载为鼠标屏幕坐标 [x, y]
+    const currentWin = getCurrentWindow();
+
     await listen<[number, number]>('text-selected', async (event) => {
       try {
-        const text = await invoke<string>('get_selected_text');
+        const [text, autoTranslate] = await invoke<[string, boolean]>('get_selected_text');
         if (!text || text.trim().length === 0) return;
 
         selectedText = text;
-        translatedText = '';
-        isLoading = true;
+        mode = 'toolbar';
+        resultText = '';
 
-        // 真正显示原生窗口，并定位到鼠标附近
         const [x, y] = event.payload ?? [0, 0];
         await invoke('show_popup', { x, y });
 
-        await translateText();
+        // 如果开启了自动翻译，直接执行
+        if (autoTranslate) {
+          await doTranslate('translate');
+        }
       } catch (error) {
         console.error('划词处理失败:', error);
       }
     });
+
+    // 点击窗口外部或按 ESC 关闭
+    document.addEventListener('click', (e) => {
+      if (e.target === document.body) closeWindow();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeWindow();
+    });
   });
 
-  async function translateText() {
-    if (!selectedText.trim()) return;
+  async function doTranslate(action: 'translate' | 'explain') {
+    currentAction = action;
+    mode = 'result';
     isLoading = true;
+    resultText = '';
+
     try {
-      translatedText = await invoke<string>('translate_text', {
+      resultText = await invoke<string>('translate_text', {
         text: selectedText,
-        mode: 'translate',
+        mode: action,
       });
     } catch (error) {
-      translatedText = '翻译失败: ' + error;
+      resultText = '失败: ' + error;
     } finally {
       isLoading = false;
     }
@@ -53,7 +69,8 @@
 
   async function closeWindow() {
     selectedText = '';
-    translatedText = '';
+    resultText = '';
+    mode = 'toolbar';
     await invoke('hide_popup');
   }
 </script>
@@ -62,28 +79,36 @@
   <Settings />
 {:else}
   <main>
-    <div class="popup-window">
-      <div class="header" data-tauri-drag-region>
-        <h3>划词翻译</h3>
+    {#if mode === 'toolbar'}
+      <div class="toolbar">
+        <button class="action-btn" on:click={() => doTranslate('translate')}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M5 8h14M5 12h14M5 16h10" />
+          </svg>
+          翻译
+        </button>
+        <div class="divider"></div>
+        <button class="action-btn" on:click={() => doTranslate('explain')}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10" />
+            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01" />
+          </svg>
+          解释
+        </button>
         <button class="close-btn" on:click={closeWindow}>×</button>
       </div>
-
-      <div class="content">
-        <div class="text-section">
-          <label>原文</label>
-          <p class="source-text">{selectedText}</p>
-        </div>
-
-        <div class="text-section">
-          <label>译文</label>
-          {#if isLoading}
-            <p class="loading">翻译中...</p>
-          {:else}
-            <p class="translated-text">{translatedText}</p>
-          {/if}
-        </div>
+    {:else}
+      <div class="result-card">
+        {#if isLoading}
+          <div class="loading-dots">
+            <span></span><span></span><span></span>
+          </div>
+        {:else}
+          <p class="result-text">{resultText}</p>
+        {/if}
+        <button class="mini-close" on:click={closeWindow}>×</button>
       </div>
-    </div>
+    {/if}
   </main>
 {/if}
 
@@ -92,101 +117,171 @@
     margin: 0;
     padding: 0;
     background: transparent;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
   }
 
   main {
     width: 100vw;
     height: 100vh;
-    overflow: hidden;
-  }
-
-  .popup-window {
-    width: 100%;
-    height: 100%;
-    background: rgba(255, 255, 255, 0.98);
-    border-radius: 12px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-  }
-
-  .header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 12px 16px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    cursor: move;
-    user-select: none;
-  }
-
-  .header h3 {
-    margin: 0;
-    font-size: 15px;
-    font-weight: 600;
-  }
-
-  .close-btn {
-    background: transparent;
-    border: none;
-    color: white;
-    font-size: 24px;
-    line-height: 1;
-    cursor: pointer;
-    width: 28px;
-    height: 28px;
     display: flex;
     align-items: center;
     justify-content: center;
+    padding: 8px;
+    box-sizing: border-box;
+  }
+
+  /* 工具条 - 玻璃态横条 */
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 8px;
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 10px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08), 0 1px 4px rgba(0, 0, 0, 0.04);
+  }
+
+  .action-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 12px;
+    border: none;
+    background: transparent;
+    color: #333;
+    font-size: 13px;
+    border-radius: 7px;
+    cursor: pointer;
+    transition: background 0.15s;
+    white-space: nowrap;
+  }
+
+  .action-btn:hover {
+    background: rgba(0, 0, 0, 0.06);
+  }
+
+  .action-btn svg {
+    flex-shrink: 0;
+  }
+
+  .divider {
+    width: 1px;
+    height: 16px;
+    background: rgba(0, 0, 0, 0.1);
+    margin: 0 2px;
+  }
+
+  .close-btn {
+    padding: 4px 8px;
+    border: none;
+    background: transparent;
+    color: #666;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
     border-radius: 6px;
+    transition: background 0.15s, color 0.15s;
   }
 
   .close-btn:hover {
-    background: rgba(255, 255, 255, 0.2);
-  }
-
-  .content {
-    padding: 16px;
-    overflow-y: auto;
-    flex: 1;
-  }
-
-  .text-section {
-    margin-bottom: 16px;
-  }
-
-  .text-section:last-child {
-    margin-bottom: 0;
-  }
-
-  .text-section label {
-    display: block;
-    font-size: 11px;
-    color: #888;
-    margin-bottom: 6px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-
-  .source-text,
-  .translated-text,
-  .loading {
-    margin: 0;
-    padding: 10px 12px;
-    background: #f5f7fa;
-    border-radius: 8px;
-    line-height: 1.6;
-    font-size: 14px;
+    background: rgba(0, 0, 0, 0.08);
     color: #333;
-    white-space: pre-wrap;
-    word-break: break-word;
   }
 
-  .loading {
-    color: #999;
-    font-style: italic;
+  /* 翻译结果卡片 - 窄长条半透明 */
+  .result-card {
+    position: relative;
+    width: 100%;
+    max-width: 500px;
+    padding: 12px 36px 12px 14px;
+    background: rgba(250, 250, 250, 0.92);
+    backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    border-radius: 12px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1), 0 2px 6px rgba(0, 0, 0, 0.06);
+    box-sizing: border-box;
+  }
+
+  .result-text {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.6;
+    color: #1a1a1a;
+    word-break: break-word;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  .result-text::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  .result-text::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 2px;
+  }
+
+  .loading-dots {
+    display: flex;
+    gap: 6px;
+    justify-content: center;
+    align-items: center;
+    padding: 8px 0;
+  }
+
+  .loading-dots span {
+    width: 6px;
+    height: 6px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 50%;
+    animation: bounce 1.2s infinite ease-in-out;
+  }
+
+  .loading-dots span:nth-child(1) {
+    animation-delay: -0.32s;
+  }
+
+  .loading-dots span:nth-child(2) {
+    animation-delay: -0.16s;
+  }
+
+  @keyframes bounce {
+    0%,
+    80%,
+    100% {
+      transform: scale(0);
+      opacity: 0.5;
+    }
+    40% {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+
+  .mini-close {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: none;
+    background: rgba(0, 0, 0, 0.05);
+    color: #666;
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s, color 0.15s;
+  }
+
+  .mini-close:hover {
+    background: rgba(0, 0, 0, 0.12);
+    color: #333;
   }
 </style>

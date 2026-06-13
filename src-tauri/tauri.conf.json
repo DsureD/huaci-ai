@@ -31,8 +31,8 @@
     "windows": [
       {
         "title": "划词AI",
-        "width": 400,
-        "height": 300,
+        "width": 320,
+        "height": 120,
         "resizable": false,
         "fullscreen": false,
         "decorations": false,
@@ -40,7 +40,7 @@
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "visible": false,
-        "center": true,
+        "center": false,
         "label": "main"
       }
     ],

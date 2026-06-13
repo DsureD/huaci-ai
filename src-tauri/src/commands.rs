@@ -8,10 +8,12 @@ pub struct AppState {
     pub config: Mutex<config::Config>,
 }
 
-// 获取选中文本
+// 获取选中文本及自动翻译开关状态
 #[tauri::command]
-pub fn get_selected_text(app: AppHandle) -> Result<String, String> {
-    clipboard::get_selected_text(&app).map_err(|e| e.to_string())
+pub fn get_selected_text(app: AppHandle, state: State<'_, AppState>) -> Result<(String, bool), String> {
+    let text = clipboard::get_selected_text(&app).map_err(|e| e.to_string())?;
+    let auto_translate = state.config.lock().unwrap().app.auto_translate;
+    Ok((text, auto_translate))
 }
 
 // 翻译文本
