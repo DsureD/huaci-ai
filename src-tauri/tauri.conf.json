@@ -15,12 +15,21 @@
     "icon": [
       "icons/icon.ico"
     ],
+    "createUpdaterArtifacts": false,
+    "publisher": "HuaciAI",
     "windows": {
       "certificateThumbprint": null,
       "digestAlgorithm": "sha256",
       "timestampUrl": "",
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
       "wix": {
         "language": "zh-CN"
+      },
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "installMode": "perUser"
       }
     }
   },
@@ -37,7 +46,8 @@
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "visible": false,
-        "center": true
+        "center": true,
+        "label": "main"
       }
     ],
     "security": {

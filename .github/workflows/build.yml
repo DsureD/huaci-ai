@@ -40,6 +40,76 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Create Portable ZIP
+        shell: pwsh
+        run: |
+          $exePath = "src-tauri/target/release/huaci-ai.exe"
+          $outputDir = "portable"
+          $tempDir = "$outputDir/HuaciAI_Portable"
+
+          New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
+
+          Copy-Item $exePath -Destination $tempDir
+          Copy-Item "config.example.json" -Destination "$tempDir/config.json"
+          Copy-Item "README.md" -Destination $tempDir
+          Copy-Item "启动程序.bat" -Destination $tempDir
+
+          @"
+          # 划词AI - 便携版使用说明
+
+          ## 快速开始
+
+          1. **配置 API Key**
+             - 编辑 config.json
+             - 找到 "api_key" 字段
+             - 替换为你的真实 API 密钥
+
+          2. **启动程序**
+             - 双击 "启动程序.bat" (会检查配置)
+             - 或直接双击 "huaci-ai.exe"
+             - 程序会最小化到系统托盘
+
+          3. **使用翻译**
+             - 在任意应用中选中文本
+             - 等待 1-2 秒自动弹出翻译
+
+          ## 托盘菜单
+
+          右键托盘图标：
+          - 启用/禁用划词监听
+          - 退出程序
+
+          ## API 配置示例
+
+          OpenAI:
+            "base_url": "https://api.openai.com/v1"
+            "api_key": "sk-proj-xxx..."
+            "model": "gpt-4o-mini"
+
+          DeepSeek:
+            "base_url": "https://api.deepseek.com/v1"
+            "api_key": "sk-xxx..."
+            "model": "deepseek-chat"
+
+          其他兼容 OpenAI 格式的接口同理。
+
+          ## 注意事项
+
+          - 首次运行可能需要安装 WebView2 运行时
+          - 请将程序添加到杀毒软件白名单
+          - 配置文件在程序同目录，方便备份
+          "@ | Out-File -FilePath "$tempDir/使用说明.txt" -Encoding UTF8
+
+          Compress-Archive -Path $tempDir -DestinationPath "$outputDir/HuaciAI_0.1.0_x64_Portable.zip" -Force
+
+          Write-Host "✓ Portable version created"
+
+      - name: Upload Portable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-portable
+          path: portable/*.zip
+
       - name: Upload MSI artifact
         uses: actions/upload-artifact@v4
         with:

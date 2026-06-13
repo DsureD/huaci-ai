@@ -30,12 +30,16 @@ fn main() {
             config: Mutex::new(app_config),
         })
         .setup(|app| {
+            // 隐藏主窗口（只用于悬浮翻译）
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.hide();
+            }
+
             // 创建托盘菜单
             let toggle_item = MenuItem::with_id(app, "toggle", "启用划词监听", true, None::<&str>)?;
-            let settings_item = MenuItem::with_id(app, "settings", "设置", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
 
-            let menu = Menu::with_items(app, &[&toggle_item, &settings_item, &quit_item])?;
+            let menu = Menu::with_items(app, &[&toggle_item, &quit_item])?;
 
             // 创建托盘图标
             let _tray = TrayIconBuilder::new()
@@ -45,12 +49,6 @@ fn main() {
                         let current = mouse_hook::is_capture_enabled();
                         mouse_hook::set_capture_enabled(!current);
                         println!("划词监听: {}", if !current { "已启用" } else { "已禁用" });
-                    }
-                    "settings" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
                     }
                     "quit" => {
                         let _ = mouse_hook::uninstall_mouse_hook();
