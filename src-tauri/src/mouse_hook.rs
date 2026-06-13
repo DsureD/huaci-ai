@@ -3,7 +3,7 @@ use tauri::{AppHandle, Emitter};
 use windows::Win32::Foundation::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-// 使用 Option<isize> 存储钩子句柄的原始值
+// 使用 isize 存储钩子句柄
 static HOOK_HANDLE: Mutex<Option<isize>> = Mutex::new(None);
 static APP_HANDLE: Mutex<Option<Arc<AppHandle>>> = Mutex::new(None);
 static CAPTURE_ENABLED: Mutex<bool> = Mutex::new(true);
@@ -16,7 +16,7 @@ unsafe extern "system" fn mouse_proc(n_code: i32, w_param: WPARAM, l_param: LPAR
             // 检查是否启用捕获
             if let Ok(enabled) = CAPTURE_ENABLED.lock() {
                 if !*enabled {
-                    return CallNextHookEx(HHOOK(0), n_code, w_param, l_param);
+                    return CallNextHookEx(HHOOK(std::ptr::null_mut()), n_code, w_param, l_param);
                 }
             }
 
@@ -32,7 +32,7 @@ unsafe extern "system" fn mouse_proc(n_code: i32, w_param: WPARAM, l_param: LPAR
         }
     }
 
-    CallNextHookEx(HHOOK(0), n_code, w_param, l_param)
+    CallNextHookEx(HHOOK(std::ptr::null_mut()), n_code, w_param, l_param)
 }
 
 // 安装全局鼠标钩子
@@ -43,8 +43,8 @@ pub fn install_mouse_hook(app_handle: AppHandle) -> anyhow::Result<()> {
 
         let hook = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_proc), HINSTANCE::default(), 0)?;
 
-        // 存储句柄的原始值
-        *HOOK_HANDLE.lock().unwrap() = Some(hook.0);
+        // 存储句柄的原始值（转换为 isize）
+        *HOOK_HANDLE.lock().unwrap() = Some(hook.0 as isize);
 
         println!("✓ 全局鼠标钩子已安装");
     }
@@ -56,7 +56,7 @@ pub fn install_mouse_hook(app_handle: AppHandle) -> anyhow::Result<()> {
 pub fn uninstall_mouse_hook() -> anyhow::Result<()> {
     if let Some(hook_value) = HOOK_HANDLE.lock().unwrap().take() {
         unsafe {
-            UnhookWindowsHookEx(HHOOK(hook_value))?;
+            UnhookWindowsHookEx(HHOOK(hook_value as *mut _))?;
             println!("✓ 全局鼠标钩子已卸载");
         }
     }
