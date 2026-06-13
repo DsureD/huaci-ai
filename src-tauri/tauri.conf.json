@@ -15,8 +15,6 @@
     "icon": [
       "icons/icon.ico"
     ],
-    "createUpdaterArtifacts": false,
-    "publisher": "HuaciAI",
     "windows": {
       "certificateThumbprint": null,
       "digestAlgorithm": "sha256",
@@ -26,10 +24,6 @@
       },
       "wix": {
         "language": "zh-CN"
-      },
-      "nsis": {
-        "installerIcon": "icons/icon.ico",
-        "installMode": "perUser"
       }
     }
   },
