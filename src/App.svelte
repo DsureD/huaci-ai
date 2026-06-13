@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { getCurrentWindow } from '@tauri-apps/api/window';
+  import { LogicalSize } from '@tauri-apps/api/dpi';
   import Settings from './Settings.svelte';
 
   const view = new URLSearchParams(window.location.search).get('view');
@@ -13,6 +14,29 @@
   let resultText = '';
   let isLoading = false;
   let currentAction: 'translate' | 'explain' = 'translate';
+  let rootEl: HTMLElement;
+
+  // 根据内容自适应窗口尺寸，消除四周的透明空白
+  async function resizeToContent() {
+    await tick();
+    if (!rootEl) return;
+    const w = Math.ceil(rootEl.offsetWidth);
+    const h = Math.ceil(rootEl.offsetHeight);
+    if (w <= 0 || h <= 0) return;
+    try {
+      await getCurrentWindow().setSize(new LogicalSize(w, h));
+    } catch (e) {
+      console.error('调整窗口尺寸失败:', e);
+    }
+  }
+
+  // 内容变化时重新测量
+  $: if (!isSettings && rootEl) {
+    void mode;
+    void resultText;
+    void isLoading;
+    resizeToContent();
+  }
 
   onMount(async () => {
     if (isSettings) return;
@@ -28,6 +52,9 @@
         mode = 'toolbar';
         resultText = '';
 
+        // 先量好尺寸再显示，避免出现默认大窗口的闪烁
+        await resizeToContent();
+
         const [x, y] = event.payload ?? [0, 0];
         await invoke('show_popup', { x, y });
 
@@ -40,10 +67,12 @@
       }
     });
 
-    // 点击窗口外部或按 ESC 关闭
-    document.addEventListener('click', (e) => {
-      if (e.target === document.body) closeWindow();
+    // 点击窗口外部（弹窗失去焦点）自动关闭
+    await currentWin.onFocusChanged(({ payload: focused }) => {
+      if (!focused) closeWindow();
     });
+
+    // 按 ESC 关闭
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') closeWindow();
     });
@@ -78,7 +107,7 @@
 {#if isSettings}
   <Settings />
 {:else}
-  <main>
+  <div class="popup" bind:this={rootEl}>
     {#if mode === 'toolbar'}
       <div class="toolbar">
         <button class="action-btn" on:click={() => doTranslate('translate')}>
@@ -95,21 +124,26 @@
           </svg>
           解释
         </button>
-        <button class="close-btn" on:click={closeWindow}>×</button>
+        <button class="close-btn" on:click={closeWindow} aria-label="关闭">×</button>
       </div>
     {:else}
       <div class="result-card">
+        <div class="card-head">
+          <span class="badge" class:explain={currentAction === 'explain'}>
+            {currentAction === 'translate' ? '翻译' : '解释'}
+          </span>
+          <button class="mini-close" on:click={closeWindow} aria-label="关闭">×</button>
+        </div>
         {#if isLoading}
           <div class="loading-dots">
             <span></span><span></span><span></span>
           </div>
         {:else}
-          <p class="result-text">{resultText}</p>
+          <div class="result-text">{resultText}</div>
         {/if}
-        <button class="mini-close" on:click={closeWindow}>×</button>
       </div>
     {/if}
-  </main>
+  </div>
 {/if}
 
 <style>
@@ -117,16 +151,15 @@
     margin: 0;
     padding: 0;
     background: transparent;
+    overflow: hidden;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
   }
 
-  main {
-    width: 100vw;
-    height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 8px;
+  /* 内容容器：宽高随内容自适应（窗口会被脚本设为同样大小） */
+  .popup {
+    display: inline-block;
+    /* 预留空间给阴影，避免被透明窗口边缘裁切 */
+    padding: 12px;
     box-sizing: border-box;
   }
 
@@ -136,23 +169,23 @@
     align-items: center;
     gap: 4px;
     padding: 6px 8px;
-    background: rgba(255, 255, 255, 0.85);
+    background: rgba(255, 255, 255, 0.88);
     backdrop-filter: blur(20px) saturate(180%);
     border: 1px solid rgba(0, 0, 0, 0.08);
-    border-radius: 10px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08), 0 1px 4px rgba(0, 0, 0, 0.04);
+    border-radius: 12px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12), 0 1px 4px rgba(0, 0, 0, 0.06);
   }
 
   .action-btn {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 5px;
     padding: 6px 12px;
     border: none;
     background: transparent;
     color: #333;
     font-size: 13px;
-    border-radius: 7px;
+    border-radius: 8px;
     cursor: pointer;
     transition: background 0.15s;
     white-space: nowrap;
@@ -190,37 +223,71 @@
     color: #333;
   }
 
-  /* 翻译结果卡片 - 窄长条半透明 */
+  /* 翻译结果卡片 */
   .result-card {
-    position: relative;
-    width: 100%;
-    max-width: 500px;
-    padding: 12px 36px 12px 14px;
-    background: rgba(250, 250, 250, 0.92);
+    width: 340px;
+    padding: 10px 12px 12px;
+    background: rgba(252, 252, 253, 0.95);
     backdrop-filter: blur(24px) saturate(180%);
     border: 1px solid rgba(0, 0, 0, 0.06);
-    border-radius: 12px;
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1), 0 2px 6px rgba(0, 0, 0, 0.06);
+    border-radius: 14px;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.14), 0 2px 8px rgba(0, 0, 0, 0.06);
     box-sizing: border-box;
+  }
+
+  .card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+
+  .badge {
+    font-size: 11px;
+    font-weight: 600;
+    color: #4f6bed;
+    background: rgba(79, 107, 237, 0.1);
+    padding: 2px 8px;
+    border-radius: 6px;
+    letter-spacing: 0.5px;
+  }
+
+  .badge.explain {
+    color: #d97706;
+    background: rgba(217, 119, 6, 0.12);
   }
 
   .result-text {
     margin: 0;
     font-size: 14px;
-    line-height: 1.6;
+    line-height: 1.65;
     color: #1a1a1a;
+    white-space: pre-wrap;
     word-break: break-word;
-    max-height: 200px;
+    overflow-wrap: anywhere;
+    max-height: 360px;
     overflow-y: auto;
+    overflow-x: hidden;
+    /* Firefox 滚动条 */
+    scrollbar-width: thin;
+    scrollbar-color: rgba(0, 0, 0, 0.18) transparent;
   }
 
   .result-text::-webkit-scrollbar {
-    width: 4px;
+    width: 6px;
+  }
+
+  .result-text::-webkit-scrollbar-track {
+    background: transparent;
   }
 
   .result-text::-webkit-scrollbar-thumb {
-    background: rgba(0, 0, 0, 0.2);
-    border-radius: 2px;
+    background: rgba(0, 0, 0, 0.18);
+    border-radius: 3px;
+  }
+
+  .result-text::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 0, 0, 0.3);
   }
 
   .loading-dots {
@@ -228,13 +295,13 @@
     gap: 6px;
     justify-content: center;
     align-items: center;
-    padding: 8px 0;
+    padding: 12px 0;
   }
 
   .loading-dots span {
     width: 6px;
     height: 6px;
-    background: rgba(0, 0, 0, 0.3);
+    background: rgba(79, 107, 237, 0.6);
     border-radius: 50%;
     animation: bounce 1.2s infinite ease-in-out;
   }
@@ -261,16 +328,13 @@
   }
 
   .mini-close {
-    position: absolute;
-    top: 8px;
-    right: 8px;
     width: 22px;
     height: 22px;
     padding: 0;
     border: none;
     background: rgba(0, 0, 0, 0.05);
     color: #666;
-    font-size: 16px;
+    font-size: 15px;
     line-height: 1;
     cursor: pointer;
     border-radius: 50%;

@@ -31,9 +31,9 @@
     "windows": [
       {
         "title": "划词AI",
-        "width": 320,
-        "height": 120,
-        "resizable": false,
+        "width": 200,
+        "height": 60,
+        "resizable": true,
         "fullscreen": false,
         "decorations": false,
         "transparent": true,
