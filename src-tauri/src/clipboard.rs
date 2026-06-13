@@ -1,7 +1,6 @@
 use tauri::AppHandle;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
-use windows::Win32::UI::WindowsAndMessaging::*;
 
 // 获取选中文本
 pub fn get_selected_text(app: &AppHandle) -> anyhow::Result<String> {
