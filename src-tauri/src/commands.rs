@@ -1,4 +1,5 @@
 use crate::{api_manager, clipboard, config, mouse_hook, translator};
+use serde::Serialize;
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, State, WebviewUrl, WebviewWindowBuilder};
@@ -6,6 +7,13 @@ use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, State, WebviewUrl
 // 全局配置状态
 pub struct AppState {
     pub config: Mutex<config::Config>,
+}
+
+#[derive(Serialize)]
+pub struct TranslateResult {
+    text: String,
+    endpoint_name: String,
+    model: String,
 }
 
 // 获取选中文本及自动翻译开关状态
@@ -22,7 +30,7 @@ pub async fn translate_text(
     text: String,
     mode: String,
     state: State<'_, AppState>,
-) -> Result<String, String> {
+) -> Result<TranslateResult, String> {
     let config = state.config.lock().unwrap().clone();
 
     // 检查文本长度
@@ -40,7 +48,7 @@ pub async fn translate_text(
     // 调用 API（带故障转移）
     let timeout = Duration::from_secs(config.api.timeout_seconds);
 
-    api_manager::translate_with_failover(
+    let (result_text, endpoint) = api_manager::translate_with_failover(
         &text,
         config.api.endpoints.clone(),
         prompt_template,
@@ -48,7 +56,13 @@ pub async fn translate_text(
         timeout,
     )
     .await
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+
+    Ok(TranslateResult {
+        text: result_text,
+        endpoint_name: endpoint.name,
+        model: endpoint.model,
+    })
 }
 
 // 保存配置

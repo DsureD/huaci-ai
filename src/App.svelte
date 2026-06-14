@@ -21,6 +21,8 @@
   let selectedText = '';
   let mode: 'toolbar' | 'result' = 'toolbar'; // toolbar=工具条, result=翻译结果
   let resultText = '';
+  let resultEndpoint = '';
+  let resultModel = '';
   let isLoading = false;
   let currentAction: 'translate' | 'explain' = 'translate';
   let rootEl: HTMLElement;
@@ -50,6 +52,7 @@
   $: if (!isSettings && rootEl) {
     void mode;
     void renderedHtml;
+    void resultEndpoint;
     void isLoading;
     resizeToContent();
   }
@@ -67,6 +70,8 @@
         selectedText = text;
         mode = 'toolbar';
         resultText = '';
+        resultEndpoint = '';
+        resultModel = '';
         pinned = false;
 
         const [x, y] = event.payload ?? [0, 0];
@@ -108,13 +113,18 @@
     mode = 'result';
     isLoading = true;
     resultText = '';
+    resultEndpoint = '';
+    resultModel = '';
     await resizeToContent();
 
     try {
-      resultText = await invoke<string>('translate_text', {
+      const result = await invoke<{ text: string; endpoint_name: string; model: string }>('translate_text', {
         text: selectedText,
         mode: action,
       });
+      resultText = result.text;
+      resultEndpoint = result.endpoint_name;
+      resultModel = result.model;
     } catch (error) {
       resultText = '失败: ' + error;
     } finally {
@@ -159,6 +169,8 @@
   async function closeWindow() {
     selectedText = '';
     resultText = '';
+    resultEndpoint = '';
+    resultModel = '';
     mode = 'toolbar';
     pinned = false;
     copied = false;
@@ -191,9 +203,14 @@
     {:else}
       <div class="result-card">
         <div class="card-head" on:mousedown={startDrag} role="toolbar" tabindex="-1">
-          <span class="badge" class:explain={currentAction === 'explain'}>
-            {currentAction === 'translate' ? '翻译' : '解释'}
-          </span>
+          <div class="head-left">
+            <span class="badge" class:explain={currentAction === 'explain'}>
+              {currentAction === 'translate' ? '翻译' : '解释'}
+            </span>
+            {#if resultEndpoint}
+              <span class="model-info">{resultEndpoint} · {resultModel}</span>
+            {/if}
+          </div>
           <div class="head-actions">
             <button
               class="icon-btn"
@@ -338,6 +355,15 @@
     margin-bottom: 8px;
     cursor: move;
     user-select: none;
+    gap: 10px;
+  }
+
+  .head-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 0;
   }
 
   .badge {
@@ -348,11 +374,21 @@
     padding: 2px 8px;
     border-radius: 6px;
     letter-spacing: 0.5px;
+    flex-shrink: 0;
   }
 
   .badge.explain {
     color: #d97706;
     background: rgba(217, 119, 6, 0.12);
+  }
+
+  .model-info {
+    font-size: 11px;
+    color: #8a909c;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-weight: 500;
   }
 
   .head-actions {

@@ -402,6 +402,8 @@
     margin-bottom: 14px;
     background: #fdfdfe;
     transition: border-color 0.15s, opacity 0.15s;
+    transform: translateZ(0);
+    will-change: opacity;
   }
 
   .endpoint.disabled {
