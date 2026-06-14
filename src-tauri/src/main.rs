@@ -106,6 +106,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_selected_text,
+            commands::restore_clipboard,
             commands::translate_text,
             commands::save_config,
             commands::load_config,

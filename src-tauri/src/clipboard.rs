@@ -2,8 +2,8 @@ use tauri::AppHandle;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 
-// 获取选中文本
-pub fn get_selected_text(app: &AppHandle) -> anyhow::Result<String> {
+// 获取选中文本,返回 (选中的文本, 需要恢复的旧剪贴板内容)
+pub fn get_selected_text(app: &AppHandle) -> anyhow::Result<(String, Option<String>)> {
     // 保存当前剪贴板内容
     let old_clipboard = app.clipboard().read_text().ok();
 
@@ -27,18 +27,12 @@ pub fn get_selected_text(app: &AppHandle) -> anyhow::Result<String> {
         _ => String::new(),
     };
 
-    // 如果没检测到新选中,不动剪贴板(避免频繁写入);
-    // 如果检测到新选中,也暂时保留在剪贴板(用户可能想继续用)
-    // 只在明确有新选中且与旧不同时,才考虑恢复旧内容
+    // 返回选中文本和旧剪贴板内容,让调用方决定何时恢复
+    // (立即恢复会触发终端清空选区,需延迟到弹窗显示后)
     if selected_text.is_empty() {
-        // 没选中,保持剪贴板不变
-        Ok(String::new())
+        Ok((String::new(), None))
     } else {
-        // 有选中,立即恢复旧剪贴板(让用户剪贴板不受影响)
-        if let Some(old_text) = old_clipboard {
-            let _ = app.clipboard().write_text(old_text);
-        }
-        Ok(selected_text)
+        Ok((selected_text, old_clipboard))
     }
 }
 

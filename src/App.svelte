@@ -68,7 +68,7 @@
 
     await listen<[number, number]>('text-selected', async (event) => {
       try {
-        const [text, autoTranslate] = await invoke<[string, boolean]>('get_selected_text');
+        const [text, autoTranslate, oldClipboard] = await invoke<[string, boolean, string | null]>('get_selected_text');
         if (!text || text.trim().length === 0) return;
 
         selectedText = text;
@@ -82,6 +82,13 @@
         await invoke('show_popup', { x, y });
         // 显示后再按内容收紧尺寸 + 钳进屏幕
         await resizeToContent();
+
+        // 延迟 300ms 恢复旧剪贴板(等弹窗稳定后,避免触发终端清空选区)
+        if (oldClipboard) {
+          setTimeout(() => {
+            invoke('restore_clipboard', { text: oldClipboard }).catch(() => {});
+          }, 300);
+        }
 
         // 如果开启了自动翻译，直接执行
         if (autoTranslate) {

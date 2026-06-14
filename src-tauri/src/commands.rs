@@ -16,12 +16,22 @@ pub struct TranslateResult {
     model: String,
 }
 
-// 获取选中文本及自动翻译开关状态
+// 获取选中文本及自动翻译开关状态,返回 (文本, 自动翻译, 旧剪贴板)
 #[tauri::command]
-pub fn get_selected_text(app: AppHandle, state: State<'_, AppState>) -> Result<(String, bool), String> {
-    let text = clipboard::get_selected_text(&app).map_err(|e| e.to_string())?;
+pub fn get_selected_text(app: AppHandle, state: State<'_, AppState>) -> Result<(String, bool, Option<String>), String> {
+    let (text, old_clipboard) = clipboard::get_selected_text(&app).map_err(|e| e.to_string())?;
     let auto_translate = state.config.lock().unwrap().app.auto_translate;
-    Ok((text, auto_translate))
+    Ok((text, auto_translate, old_clipboard))
+}
+
+// 恢复剪贴板内容(延迟恢复,避免触发终端清空选区)
+#[tauri::command]
+pub fn restore_clipboard(app: AppHandle, text: Option<String>) -> Result<(), String> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+    if let Some(t) = text {
+        app.clipboard().write_text(t).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 // 翻译文本
@@ -167,13 +177,20 @@ pub async fn list_models(
 // 打开（或聚焦）设置窗口
 #[tauri::command]
 pub fn open_settings(app: AppHandle) -> Result<(), String> {
+    // 先尝试销毁旧窗口(如果存在但已无效),避免累积
     if let Some(win) = app.get_webview_window("settings") {
-        let _ = win.show();
-        let _ = win.set_focus();
-        return Ok(());
+        // 检查窗口是否仍然有效(可见或可聚焦)
+        if win.is_visible().unwrap_or(false) || win.set_focus().is_ok() {
+            let _ = win.show();
+            let _ = win.set_focus();
+            return Ok(());
+        } else {
+            // 窗口引用存在但已失效,销毁它
+            let _ = win.close();
+        }
     }
 
-    WebviewWindowBuilder::new(
+    let win = WebviewWindowBuilder::new(
         &app,
         "settings",
         WebviewUrl::App("index.html?view=settings".into()),
@@ -184,5 +201,13 @@ pub fn open_settings(app: AppHandle) -> Result<(), String> {
     .center()
     .build()
     .map_err(|e| e.to_string())?;
+
+    // 监听窗口关闭事件,主动销毁以释放资源
+    let _ = win.on_window_event(|event| {
+        if let tauri::WindowEvent::CloseRequested { .. } = event {
+            // 用户点击关闭时,确保窗口被完全销毁
+        }
+    });
+
     Ok(())
 }

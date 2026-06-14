@@ -57,6 +57,7 @@
   let modelLoading: Record<number, boolean> = {};
   let modelMsg: Record<number, string> = {};
   let modelOpen: Record<number, boolean> = {};
+  let comboRefs: Record<number, HTMLDivElement> = {};  // 记录每个输入框的引用,用于定位下拉
 
   async function queryModels(i: number) {
     if (!config) return;
@@ -161,7 +162,7 @@
                 <div class="full model-field">
                   <span class="label-text">模型</span>
                   <div class="model-row">
-                    <div class="combo">
+                    <div class="combo" bind:this={comboRefs[i]}>
                       <input
                         bind:value={ep.model}
                         placeholder="gpt-4o-mini"
@@ -187,16 +188,6 @@
                             modelOpen = modelOpen;
                           }}
                         >▾</button>
-                      {/if}
-                      {#if modelOpen[i] && modelOptions[i]?.length}
-                        <ul class="combo-list">
-                          {#each modelOptions[i] as m}
-                            <li
-                              class:active={m === ep.model}
-                              on:mousedown|preventDefault={() => pickModel(i, m)}
-                            >{m}</li>
-                          {/each}
-                        </ul>
                       {/if}
                     </div>
                     <button class="query" on:click={() => queryModels(i)} disabled={modelLoading[i]}>
@@ -273,6 +264,30 @@
     </div>
   {/if}
 </div>
+
+<!-- 全局下拉列表(fixed 定位,不受父容器限制) -->
+{#each Object.keys(modelOpen) as idx}
+  {#if modelOpen[+idx] && modelOptions[+idx]?.length && comboRefs[+idx]}
+    <ul
+      class="combo-list-global"
+      style="
+        left: {comboRefs[+idx]?.getBoundingClientRect().left}px;
+        top: {comboRefs[+idx]?.getBoundingClientRect().bottom + 4}px;
+        width: {comboRefs[+idx]?.getBoundingClientRect().width}px;
+      "
+    >
+      {#each modelOptions[+idx].slice(0, 100) as m}
+        <li
+          class:active={m === config?.api.endpoints[+idx]?.model}
+          on:mousedown|preventDefault={() => pickModel(+idx, m)}
+        >{m}</li>
+      {/each}
+      {#if modelOptions[+idx].length > 100}
+        <li class="overflow-hint">... 还有 {modelOptions[+idx].length - 100} 个模型,请输入筛选</li>
+      {/if}
+    </ul>
+  {/if}
+{/each}
 
 <style>
   :global(html, body) {
@@ -520,11 +535,8 @@
     color: #4f6bed;
   }
 
-  .combo-list {
-    position: absolute;
-    top: calc(100% + 4px);
-    left: 0;
-    right: 0;
+  .combo-list-global {
+    position: fixed;
     margin: 0;
     padding: 4px;
     list-style: none;
@@ -534,10 +546,10 @@
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
     max-height: 220px;
     overflow-y: auto;
-    z-index: 20;
+    z-index: 9999;
   }
 
-  .combo-list li {
+  .combo-list-global li {
     padding: 7px 10px;
     font-size: 13px;
     color: #2b2f38;
@@ -548,14 +560,23 @@
     text-overflow: ellipsis;
   }
 
-  .combo-list li:hover {
+  .combo-list-global li:hover {
     background: #f0f2f8;
   }
 
-  .combo-list li.active {
+  .combo-list-global li.active {
     background: #eef1fd;
     color: #4f6bed;
     font-weight: 600;
+  }
+
+  .overflow-hint {
+    color: #8a909c;
+    font-size: 12px;
+    padding: 7px 10px;
+    text-align: center;
+    cursor: default !important;
+    background: transparent !important;
   }
 
   .query {
