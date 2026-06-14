@@ -102,17 +102,13 @@ jobs:
           - 配置文件在程序同目录，方便备份
           "@ | Out-File -FilePath "$tempDir/使用说明.txt" -Encoding UTF8
 
-          Push-Location $tempDir
-          Compress-Archive -Path * -DestinationPath "../../$outputDir/HuaciAI_0.1.0_x64_Portable.zip" -Force
-          Pop-Location
+          Write-Host "✓ Portable folder created"
 
-          Write-Host "✓ Portable version created"
-
-      - name: Upload Portable ZIP
+      - name: Upload Portable
         uses: actions/upload-artifact@v4
         with:
-          name: windows-portable
-          path: portable/*.zip
+          name: HuaciAI_0.1.0_x64_Portable
+          path: portable/HuaciAI_Portable/*
 
       - name: Upload MSI artifact
         uses: actions/upload-artifact@v4
