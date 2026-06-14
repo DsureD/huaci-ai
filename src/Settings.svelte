@@ -146,15 +146,25 @@
                 <div class="full model-field">
                   <span class="label-text">模型</span>
                   <div class="model-row">
-                    <input list={`models-${i}`} bind:value={ep.model} placeholder="gpt-4o-mini" />
+                    <input bind:value={ep.model} placeholder="gpt-4o-mini" />
                     <button class="query" on:click={() => queryModels(i)} disabled={modelLoading[i]}>
                       {modelLoading[i] ? '查询中…' : '查询模型'}
                     </button>
                   </div>
                   {#if modelOptions[i]?.length}
-                    <datalist id={`models-${i}`}>
-                      {#each modelOptions[i] as m}<option value={m}></option>{/each}
-                    </datalist>
+                    <select
+                      class="model-select"
+                      value={modelOptions[i].includes(ep.model) ? ep.model : ''}
+                      on:change={(e) => {
+                        config.api.endpoints[i].model = e.currentTarget.value;
+                        config.api.endpoints = config.api.endpoints;
+                      }}
+                    >
+                      <option value="" disabled>从 {modelOptions[i].length} 个模型中选择…</option>
+                      {#each modelOptions[i] as m}
+                        <option value={m}>{m}</option>
+                      {/each}
+                    </select>
                   {/if}
                   {#if modelMsg[i]}
                     <span class="model-msg" class:err={modelMsg[i].includes('失败')}>{modelMsg[i]}</span>
@@ -250,8 +260,7 @@
   header {
     position: sticky;
     top: 0;
-    background: rgba(238, 240, 244, 0.85);
-    backdrop-filter: blur(12px);
+    background: #eef0f4;
     padding: 16px 24px;
     display: flex;
     justify-content: space-between;
@@ -432,6 +441,24 @@
 
   .model-row input {
     flex: 1;
+  }
+
+  .model-select {
+    font-size: 13px;
+    padding: 9px 11px;
+    border: 1px solid #d8dbe2;
+    border-radius: 9px;
+    background: #fff;
+    color: #1a1a1a;
+    font-family: inherit;
+    width: 100%;
+    cursor: pointer;
+  }
+
+  .model-select:focus {
+    outline: none;
+    border-color: #4f6bed;
+    box-shadow: 0 0 0 3px rgba(79, 107, 237, 0.12);
   }
 
   .query {
