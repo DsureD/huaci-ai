@@ -3,11 +3,15 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { getCurrentWindow } from '@tauri-apps/api/window';
-  import { LogicalSize } from '@tauri-apps/api/dpi';
   import Settings from './Settings.svelte';
 
   const view = new URLSearchParams(window.location.search).get('view');
   const isSettings = view === 'settings';
+
+  // 仅在划词窗口禁止页面滚动；设置窗口需要正常滚动
+  if (!isSettings) {
+    document.documentElement.classList.add('popup-window');
+  }
 
   let selectedText = '';
   let mode: 'toolbar' | 'result' = 'toolbar'; // toolbar=工具条, result=翻译结果
@@ -16,15 +20,17 @@
   let currentAction: 'translate' | 'explain' = 'translate';
   let rootEl: HTMLElement;
 
-  // 根据内容自适应窗口尺寸，消除四周的透明空白
+  // 根据内容把窗口调整为刚好包住内容的大小（交给 Rust 设置，避免前端 DPI 计算出错）
   async function resizeToContent() {
     await tick();
+    // 等一帧，确保 WebView 已完成布局
+    await new Promise((r) => requestAnimationFrame(() => r(null)));
     if (!rootEl) return;
-    const w = Math.ceil(rootEl.offsetWidth);
-    const h = Math.ceil(rootEl.offsetHeight);
-    if (w <= 0 || h <= 0) return;
+    const width = Math.ceil(rootEl.offsetWidth);
+    const height = Math.ceil(rootEl.offsetHeight);
+    if (width <= 0 || height <= 0) return;
     try {
-      await getCurrentWindow().setSize(new LogicalSize(w, h));
+      await invoke('resize_popup', { width, height });
     } catch (e) {
       console.error('调整窗口尺寸失败:', e);
     }
@@ -52,11 +58,10 @@
         mode = 'toolbar';
         resultText = '';
 
-        // 先量好尺寸再显示，避免出现默认大窗口的闪烁
-        await resizeToContent();
-
         const [x, y] = event.payload ?? [0, 0];
         await invoke('show_popup', { x, y });
+        // 显示后再按内容收紧尺寸
+        await resizeToContent();
 
         // 如果开启了自动翻译，直接执行
         if (autoTranslate) {
@@ -83,6 +88,7 @@
     mode = 'result';
     isLoading = true;
     resultText = '';
+    await resizeToContent();
 
     try {
       resultText = await invoke<string>('translate_text', {
@@ -93,6 +99,7 @@
       resultText = '失败: ' + error;
     } finally {
       isLoading = false;
+      await resizeToContent();
     }
   }
 
@@ -150,16 +157,21 @@
   :global(html, body) {
     margin: 0;
     padding: 0;
-    background: transparent;
-    overflow: hidden;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
   }
 
-  /* 内容容器：宽高随内容自适应（窗口会被脚本设为同样大小） */
+  /* 仅划词悬浮窗：透明背景 + 禁止滚动 */
+  :global(html.popup-window),
+  :global(html.popup-window body) {
+    background: transparent;
+    overflow: hidden;
+  }
+
+  /* 内容容器：宽高随内容自适应（窗口被 Rust 设为同样大小）
+     留一点点内边距给阴影，营造悬浮感但不显空旷 */
   .popup {
     display: inline-block;
-    /* 预留空间给阴影，避免被透明窗口边缘裁切 */
-    padding: 12px;
+    padding: 8px;
     box-sizing: border-box;
   }
 
@@ -169,11 +181,11 @@
     align-items: center;
     gap: 4px;
     padding: 6px 8px;
-    background: rgba(255, 255, 255, 0.88);
+    background: rgba(255, 255, 255, 0.92);
     backdrop-filter: blur(20px) saturate(180%);
-    border: 1px solid rgba(0, 0, 0, 0.08);
+    border: 1px solid rgba(0, 0, 0, 0.1);
     border-radius: 12px;
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12), 0 1px 4px rgba(0, 0, 0, 0.06);
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.16);
   }
 
   .action-btn {
@@ -225,13 +237,13 @@
 
   /* 翻译结果卡片 */
   .result-card {
-    width: 340px;
+    width: 360px;
     padding: 10px 12px 12px;
-    background: rgba(252, 252, 253, 0.95);
+    background: rgba(252, 252, 253, 0.97);
     backdrop-filter: blur(24px) saturate(180%);
-    border: 1px solid rgba(0, 0, 0, 0.06);
+    border: 1px solid rgba(0, 0, 0, 0.1);
     border-radius: 14px;
-    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.14), 0 2px 8px rgba(0, 0, 0, 0.06);
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.16);
     box-sizing: border-box;
   }
 
@@ -265,7 +277,7 @@
     white-space: pre-wrap;
     word-break: break-word;
     overflow-wrap: anywhere;
-    max-height: 360px;
+    max-height: 380px;
     overflow-y: auto;
     overflow-x: hidden;
     /* Firefox 滚动条 */

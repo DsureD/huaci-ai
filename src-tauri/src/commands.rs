@@ -1,7 +1,7 @@
-use crate::{api_manager, clipboard, config, mouse_hook};
+use crate::{api_manager, clipboard, config, mouse_hook, translator};
 use std::sync::Mutex;
 use std::time::Duration;
-use tauri::{AppHandle, Manager, PhysicalPosition, State, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, State, WebviewUrl, WebviewWindowBuilder};
 
 // 全局配置状态
 pub struct AppState {
@@ -98,6 +98,37 @@ pub fn hide_popup(app: AppHandle) -> Result<(), String> {
         win.hide().map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+// 根据内容把悬浮窗调整为合适大小（逻辑像素），消除多余透明空白
+#[tauri::command]
+pub fn resize_popup(app: AppHandle, width: f64, height: f64) -> Result<(), String> {
+    if let Some(win) = app.get_webview_window("main") {
+        let w = width.clamp(80.0, 900.0);
+        let h = height.clamp(40.0, 700.0);
+        win.set_size(LogicalSize::new(w, h)).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+// 查询某接口可用模型列表
+#[tauri::command]
+pub async fn list_models(
+    base_url: String,
+    api_key: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, String> {
+    let (proxy, timeout) = {
+        let cfg = state.config.lock().unwrap();
+        (
+            cfg.proxy.clone(),
+            Duration::from_secs(cfg.api.timeout_seconds),
+        )
+    };
+
+    translator::list_models(&base_url, &api_key, &proxy, timeout)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 // 打开（或聚焦）设置窗口

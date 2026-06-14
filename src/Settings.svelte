@@ -52,6 +52,41 @@
     config.api.endpoints = config.api.endpoints.filter((_, i) => i !== index);
   }
 
+  // 模型查询状态（按接口索引）
+  let modelOptions: Record<number, string[]> = {};
+  let modelLoading: Record<number, boolean> = {};
+  let modelMsg: Record<number, string> = {};
+
+  async function queryModels(i: number) {
+    if (!config) return;
+    const ep = config.api.endpoints[i];
+    if (!ep.base_url) {
+      modelMsg[i] = '请先填写接口地址';
+      modelMsg = modelMsg;
+      return;
+    }
+    modelLoading[i] = true;
+    modelLoading = modelLoading;
+    modelMsg[i] = '';
+    modelMsg = modelMsg;
+    try {
+      const list = await invoke<string[]>('list_models', {
+        baseUrl: ep.base_url,
+        apiKey: ep.api_key,
+      });
+      modelOptions[i] = list;
+      modelOptions = modelOptions;
+      modelMsg[i] = list.length ? `找到 ${list.length} 个模型，点击输入框选择` : '接口未返回模型';
+      modelMsg = modelMsg;
+    } catch (e) {
+      modelMsg[i] = '查询失败: ' + e;
+      modelMsg = modelMsg;
+    } finally {
+      modelLoading[i] = false;
+      modelLoading = modelLoading;
+    }
+  }
+
   async function save() {
     if (!config) return;
     saving = true;
@@ -108,7 +143,23 @@
                 <label>优先级<input type="number" bind:value={ep.priority} min="1" /></label>
                 <label class="full">接口地址 (Base URL)<input bind:value={ep.base_url} placeholder="https://api.openai.com/v1" /></label>
                 <label class="full">API Key<input type="password" bind:value={ep.api_key} placeholder="sk-..." /></label>
-                <label class="full">模型<input bind:value={ep.model} placeholder="gpt-4o-mini" /></label>
+                <div class="full model-field">
+                  <span class="label-text">模型</span>
+                  <div class="model-row">
+                    <input list={`models-${i}`} bind:value={ep.model} placeholder="gpt-4o-mini" />
+                    <button class="query" on:click={() => queryModels(i)} disabled={modelLoading[i]}>
+                      {modelLoading[i] ? '查询中…' : '查询模型'}
+                    </button>
+                  </div>
+                  {#if modelOptions[i]?.length}
+                    <datalist id={`models-${i}`}>
+                      {#each modelOptions[i] as m}<option value={m}></option>{/each}
+                    </datalist>
+                  {/if}
+                  {#if modelMsg[i]}
+                    <span class="model-msg" class:err={modelMsg[i].includes('失败')}>{modelMsg[i]}</span>
+                  {/if}
+                </div>
               </div>
             </div>
           {/each}
@@ -358,6 +409,56 @@
 
   label.full {
     grid-column: 1 / -1;
+  }
+
+  /* 模型字段：输入 + 查询按钮 */
+  .model-field {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .label-text {
+    font-size: 12px;
+    color: #6a707c;
+  }
+
+  .model-row {
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+  }
+
+  .model-row input {
+    flex: 1;
+  }
+
+  .query {
+    flex: none;
+    white-space: nowrap;
+    background: #eef1fd;
+    color: #4f6bed;
+    font-weight: 600;
+    padding: 0 14px;
+  }
+
+  .query:hover:not(:disabled) {
+    background: #e3e8fc;
+  }
+
+  .query:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+
+  .model-msg {
+    font-size: 12px;
+    color: #2e7d32;
+  }
+
+  .model-msg.err {
+    color: #d32f2f;
   }
 
   input,

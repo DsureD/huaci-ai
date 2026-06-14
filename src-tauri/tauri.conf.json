@@ -33,7 +33,7 @@
         "title": "划词AI",
         "width": 200,
         "height": 60,
-        "resizable": true,
+        "resizable": false,
         "fullscreen": false,
         "decorations": false,
         "transparent": true,

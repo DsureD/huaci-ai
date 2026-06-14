@@ -113,6 +113,8 @@ fn main() {
             commands::get_capture_status,
             commands::show_popup,
             commands::hide_popup,
+            commands::resize_popup,
+            commands::list_models,
             commands::open_settings,
         ])
         .run(tauri::generate_context!())
