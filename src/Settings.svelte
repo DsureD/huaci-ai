@@ -280,6 +280,11 @@
     background: #eef0f4;
   }
 
+  :global(body) {
+    transform: translateZ(0);
+    backface-visibility: hidden;
+  }
+
   :global(body)::-webkit-scrollbar {
     width: 10px;
   }
@@ -304,6 +309,7 @@
     align-items: center;
     z-index: 10;
     border-bottom: 1px solid #dcdfe6;
+    transform: translateZ(0);
   }
 
   .title-wrap {
@@ -353,6 +359,7 @@
     background: #fff;
     border-radius: 14px;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 16px rgba(0, 0, 0, 0.04);
+    transform: translateZ(0);
   }
 
   .sec-head {

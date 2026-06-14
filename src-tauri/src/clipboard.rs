@@ -7,26 +7,37 @@ pub fn get_selected_text(app: &AppHandle) -> anyhow::Result<String> {
     // 保存当前剪贴板内容
     let old_clipboard = app.clipboard().read_text().ok();
 
-    // 清空剪贴板
-    let _ = app.clipboard().write_text("");
+    // 不再清空剪贴板(避免触发某些终端清空选区的副作用)
+    // 直接模拟 Ctrl+C,然后比对内容差异判断是否有新选中
 
     // 模拟 Ctrl+C
     simulate_ctrl_c()?;
 
     // 等待剪贴板更新
-    std::thread::sleep(std::time::Duration::from_millis(100));
+    std::thread::sleep(std::time::Duration::from_millis(150));
 
     // 读取新内容
-    let selected_text = app
+    let new_clipboard = app
         .clipboard()
         .read_text()
         .unwrap_or_default()
         .trim()
         .to_string();
 
+    // 判断是否有新选中:新内容非空 且 与旧内容不同
+    let selected_text = if !new_clipboard.is_empty()
+        && old_clipboard.as_deref() != Some(new_clipboard.as_str()) {
+        new_clipboard.clone()
+    } else {
+        String::new()
+    };
+
     // 恢复原剪贴板内容
     if let Some(old_text) = old_clipboard {
         let _ = app.clipboard().write_text(old_text);
+    } else if selected_text.is_empty() {
+        // 如果原剪贴板为空且没选中新内容,保持空
+        let _ = app.clipboard().write_text("");
     }
 
     Ok(selected_text)

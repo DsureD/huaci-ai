@@ -102,7 +102,9 @@ jobs:
           - 配置文件在程序同目录，方便备份
           "@ | Out-File -FilePath "$tempDir/使用说明.txt" -Encoding UTF8
 
-          Compress-Archive -Path "$tempDir/*" -DestinationPath "$outputDir/HuaciAI_0.1.0_x64_Portable.zip" -Force
+          Push-Location $tempDir
+          Compress-Archive -Path * -DestinationPath "../../$outputDir/HuaciAI_0.1.0_x64_Portable.zip" -Force
+          Pop-Location
 
           Write-Host "✓ Portable version created"
 

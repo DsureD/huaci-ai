@@ -20,16 +20,29 @@ struct ChatRequest {
 #[derive(Debug, Deserialize)]
 struct ChatResponse {
     choices: Vec<Choice>,
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    object: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct Choice {
     message: Message,
+    #[serde(default)]
+    finish_reason: Option<String>,
+    #[serde(default)]
+    index: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
 struct Message {
-    content: String,
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    role: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -131,11 +144,41 @@ pub async fn translate_text(
         ));
     }
 
-    let chat_response: ChatResponse = response.json().await?;
+    // 先取响应文本,解析失败时能看到原始内容
+    let response_text = response.text().await?;
+
+    // 调试日志:打印前 500 字符
+    if response_text.len() > 500 {
+        eprintln!("API 响应(前500字符): {}", &response_text[..500]);
+    } else {
+        eprintln!("API 响应: {}", response_text);
+    }
+
+    let chat_response: ChatResponse = serde_json::from_str(&response_text)
+        .map_err(|e| anyhow::anyhow!(
+            "解析 API 响应失败: {}。原始响应: {}",
+            e,
+            if response_text.len() > 300 {
+                format!("{}...", &response_text[..300])
+            } else {
+                response_text.clone()
+            }
+        ))?;
 
     if let Some(choice) = chat_response.choices.first() {
-        Ok(choice.message.content.trim().to_string())
+        if let Some(content) = &choice.message.content {
+            Ok(content.trim().to_string())
+        } else {
+            Err(anyhow::anyhow!(
+                "API 返回的 message.content 为空。完整响应: {}",
+                if response_text.len() > 300 {
+                    format!("{}...", &response_text[..300])
+                } else {
+                    response_text
+                }
+            ))
+        }
     } else {
-        Err(anyhow::anyhow!("API 返回空结果"))
+        Err(anyhow::anyhow!("API 返回空 choices 数组"))
     }
 }
