@@ -18,11 +18,19 @@ tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", features = ["json"] }
 anyhow = "1"
 dirs = "5"
-# 锁定 alloc-no-stdlib 到 2.x：其 3.0.0（新发布的 major）会被 alloc-stdlib 0.2.3 的宽松
-# 约束（>=2.0.4, <4.0.0）拉入，而 brotli（经 tauri 间接依赖）锁定在 2.x，二者分裂成两个
-# 不兼容版本，导致 brotli 报 E0277（StandardAlloc 未实现 Allocator）。这里用精确版本统一。
-# 仅约束版本，不引入额外 feature（由 brotli 自行启用所需 feature）。
+# 修复 brotli 的 E0277（StandardAlloc 未实现 Allocator）：
+# 上游 alloc-no-stdlib 发布了不兼容的新 major 3.0.0。brotli 这条依赖链里有两个间接依赖
+# 把约束放宽到横跨 2.x/3.x，会把 3.0.0 拉进来：
+#   - alloc-stdlib 0.2.3：alloc-no-stdlib 约束 >=2.0.4, <4.0.0
+#   - brotli-decompressor 5.0.2：alloc-no-stdlib 约束 >=2.0.4, <4
+# 而 brotli 本身把 alloc-no-stdlib 锁在 2.x，于是依赖图里同时出现 2.0.4 和 3.0.0，
+# 两个版本的 Allocator trait 互不兼容 → 编译失败。
+# 解决：把这两个“放宽约束”的源头各锁回上一版（alloc-stdlib 0.2.2、brotli-decompressor 5.0.1，
+# 它们对 alloc-no-stdlib 的约束都 <3.0.0），并把 alloc-no-stdlib 钉在 2.0.4，整图统一到 2.0.4。
+# default-features=false 只锁版本、不改变 feature 集（由 brotli 自行启用所需 feature）。
 alloc-no-stdlib = { version = "=2.0.4", default-features = false }
+alloc-stdlib = { version = "=0.2.2", default-features = false }
+brotli-decompressor = { version = "=5.0.1", default-features = false }
 
 [dependencies.windows]
 version = "0.58"
