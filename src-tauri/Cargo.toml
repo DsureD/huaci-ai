@@ -18,6 +18,11 @@ tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", features = ["json"] }
 anyhow = "1"
 dirs = "5"
+# 锁定 alloc-no-stdlib 到 2.x：其 3.0.0（新发布的 major）会被 alloc-stdlib 0.2.3 的宽松
+# 约束（>=2.0.4, <4.0.0）拉入，而 brotli（经 tauri 间接依赖）锁定在 2.x，二者分裂成两个
+# 不兼容版本，导致 brotli 报 E0277（StandardAlloc 未实现 Allocator）。这里用精确版本统一。
+# 仅约束版本，不引入额外 feature（由 brotli 自行启用所需 feature）。
+alloc-no-stdlib = { version = "=2.0.4", default-features = false }
 
 [dependencies.windows]
 version = "0.58"
