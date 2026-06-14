@@ -111,15 +111,14 @@ pub fn resize_popup(app: AppHandle, width: f64, height: f64) -> Result<(), Strin
 
         // 把窗口钳制进当前显示器的工作区（排除任务栏）
         if let Ok(Some(monitor)) = win.current_monitor() {
-            let scale = monitor.scale_factor();
             let area = monitor.work_area();
-            let ap = area.position.to_physical::<i32>(scale);
-            let asz = area.size.to_physical::<i32>(scale);
+            let ap = area.position;
+            let asz = area.size;
             if let (Ok(win_size), Ok(pos)) = (win.outer_size(), win.outer_position()) {
                 let min_x = ap.x;
                 let min_y = ap.y;
-                let max_x = (ap.x + asz.width - win_size.width as i32).max(min_x);
-                let max_y = (ap.y + asz.height - win_size.height as i32).max(min_y);
+                let max_x = (ap.x + asz.width as i32 - win_size.width as i32).max(min_x);
+                let max_y = (ap.y + asz.height as i32 - win_size.height as i32).max(min_y);
                 let nx = pos.x.clamp(min_x, max_x);
                 let ny = pos.y.clamp(min_y, max_y);
                 if nx != pos.x || ny != pos.y {
