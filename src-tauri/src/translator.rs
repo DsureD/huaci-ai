@@ -15,6 +15,7 @@ struct ChatRequest {
     messages: Vec<ChatMessage>,
     temperature: f32,
     max_tokens: u32,
+    stream: bool,  // 明确禁用流式
 }
 
 #[derive(Debug, Deserialize)]
@@ -121,6 +122,7 @@ pub async fn translate_text(
         }],
         temperature: 0.3,
         max_tokens: 1000,
+        stream: false,  // 明确禁用流式响应
     };
 
     // 发送请求
@@ -145,7 +147,15 @@ pub async fn translate_text(
     }
 
     // 先取响应文本,解析失败时能看到原始内容
-    let response_text = response.text().await?;
+    // 限制响应体最大 2MB,防止异常响应导致内存爆炸
+    let response_bytes = response.bytes().await?;
+    if response_bytes.len() > 2 * 1024 * 1024 {
+        return Err(anyhow::anyhow!(
+            "API 响应体过大({} bytes),可能是流式响应未正确关闭或服务端异常",
+            response_bytes.len()
+        ));
+    }
+    let response_text = String::from_utf8_lossy(&response_bytes).to_string();
 
     // 调试日志:打印前 500 字符
     if response_text.len() > 500 {

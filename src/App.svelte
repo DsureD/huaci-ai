@@ -8,7 +8,11 @@
   import { marked } from 'marked';
   import Settings from './Settings.svelte';
 
-  marked.setOptions({ breaks: true, gfm: true });
+  // 只配置一次,避免重复调用累积内存
+  if (typeof window !== 'undefined' && !(window as any).__markedConfigured) {
+    marked.setOptions({ breaks: true, gfm: true, async: false });
+    (window as any).__markedConfigured = true;
+  }
 
   const view = new URLSearchParams(window.location.search).get('view');
   const isSettings = view === 'settings';
@@ -122,7 +126,14 @@
         text: selectedText,
         mode: action,
       });
-      resultText = result.text;
+
+      // 防止超大响应撑爆渲染(前端保护,后端也有 2MB 限制)
+      if (result.text.length > 50000) {
+        resultText = `响应内容过大(${result.text.length} 字符),已截断显示前 10000 字符:\n\n${result.text.substring(0, 10000)}\n\n... (已省略 ${result.text.length - 10000} 字符)`;
+      } else {
+        resultText = result.text;
+      }
+
       resultEndpoint = result.endpoint_name;
       resultModel = result.model;
     } catch (error) {
