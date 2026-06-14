@@ -26,6 +26,7 @@
   let rootEl: HTMLElement;
   let pinned = false; // 钉住：不随失焦自动关闭
   let copied = false;
+  let dragging = false; // 拖动中：临时屏蔽失焦关闭
 
   $: renderedHtml = resultText ? (marked.parse(resultText) as string) : '';
 
@@ -82,9 +83,18 @@
       }
     });
 
-    // 点击窗口外部（弹窗失去焦点）自动关闭；钉住时保持
+    // 点击窗口外部（弹窗失去焦点）自动关闭；钉住或拖动中时保持
     await currentWin.onFocusChanged(({ payload: focused }) => {
-      if (!focused && !pinned) closeWindow();
+      if (focused) {
+        dragging = false;
+        return;
+      }
+      if (!pinned && !dragging) closeWindow();
+    });
+
+    // 拖动结束（松开鼠标）后解除屏蔽
+    window.addEventListener('mouseup', () => {
+      if (dragging) setTimeout(() => (dragging = false), 150);
     });
 
     // 按 ESC 关闭
@@ -116,6 +126,7 @@
   // 拖动窗口（点在标题栏空白处时）
   function startDrag(e: MouseEvent) {
     if ((e.target as HTMLElement).closest('button')) return;
+    dragging = true;
     getCurrentWindow().startDragging();
   }
 

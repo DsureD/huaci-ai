@@ -102,14 +102,6 @@
     modelOpen = modelOpen;
   }
 
-  function filteredModels(i: number): string[] {
-    const list = modelOptions[i] || [];
-    const q = (config?.api.endpoints[i].model || '').toLowerCase().trim();
-    if (!q) return list;
-    const f = list.filter((m) => m.toLowerCase().includes(q));
-    return f.length ? f : list;
-  }
-
   async function save() {
     if (!config) return;
     saving = true;
@@ -198,7 +190,7 @@
                       {/if}
                       {#if modelOpen[i] && modelOptions[i]?.length}
                         <ul class="combo-list">
-                          {#each filteredModels(i) as m}
+                          {#each modelOptions[i] as m}
                             <li
                               class:active={m === ep.model}
                               on:mousedown|preventDefault={() => pickModel(i, m)}
