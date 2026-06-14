@@ -56,6 +56,7 @@
   let modelOptions: Record<number, string[]> = {};
   let modelLoading: Record<number, boolean> = {};
   let modelMsg: Record<number, string> = {};
+  let modelOpen: Record<number, boolean> = {};
 
   async function queryModels(i: number) {
     if (!config) return;
@@ -76,7 +77,13 @@
       });
       modelOptions[i] = list;
       modelOptions = modelOptions;
-      modelMsg[i] = list.length ? `找到 ${list.length} 个模型，点击输入框选择` : '接口未返回模型';
+      if (list.length) {
+        modelMsg[i] = `找到 ${list.length} 个模型，点击输入框可下拉选择`;
+        modelOpen[i] = true;
+        modelOpen = modelOpen;
+      } else {
+        modelMsg[i] = '接口未返回模型';
+      }
       modelMsg = modelMsg;
     } catch (e) {
       modelMsg[i] = '查询失败: ' + e;
@@ -85,6 +92,22 @@
       modelLoading[i] = false;
       modelLoading = modelLoading;
     }
+  }
+
+  function pickModel(i: number, m: string) {
+    if (!config) return;
+    config.api.endpoints[i].model = m;
+    config.api.endpoints = config.api.endpoints;
+    modelOpen[i] = false;
+    modelOpen = modelOpen;
+  }
+
+  function filteredModels(i: number): string[] {
+    const list = modelOptions[i] || [];
+    const q = (config?.api.endpoints[i].model || '').toLowerCase().trim();
+    if (!q) return list;
+    const f = list.filter((m) => m.toLowerCase().includes(q));
+    return f.length ? f : list;
   }
 
   async function save() {
@@ -146,26 +169,48 @@
                 <div class="full model-field">
                   <span class="label-text">模型</span>
                   <div class="model-row">
-                    <input bind:value={ep.model} placeholder="gpt-4o-mini" />
+                    <div class="combo">
+                      <input
+                        bind:value={ep.model}
+                        placeholder="gpt-4o-mini"
+                        on:focus={() => {
+                          if (modelOptions[i]?.length) {
+                            modelOpen[i] = true;
+                            modelOpen = modelOpen;
+                          }
+                        }}
+                        on:blur={() => {
+                          setTimeout(() => {
+                            modelOpen[i] = false;
+                            modelOpen = modelOpen;
+                          }, 150);
+                        }}
+                      />
+                      {#if modelOptions[i]?.length}
+                        <button
+                          class="combo-toggle"
+                          aria-label="展开模型列表"
+                          on:mousedown|preventDefault={() => {
+                            modelOpen[i] = !modelOpen[i];
+                            modelOpen = modelOpen;
+                          }}
+                        >▾</button>
+                      {/if}
+                      {#if modelOpen[i] && modelOptions[i]?.length}
+                        <ul class="combo-list">
+                          {#each filteredModels(i) as m}
+                            <li
+                              class:active={m === ep.model}
+                              on:mousedown|preventDefault={() => pickModel(i, m)}
+                            >{m}</li>
+                          {/each}
+                        </ul>
+                      {/if}
+                    </div>
                     <button class="query" on:click={() => queryModels(i)} disabled={modelLoading[i]}>
                       {modelLoading[i] ? '查询中…' : '查询模型'}
                     </button>
                   </div>
-                  {#if modelOptions[i]?.length}
-                    <select
-                      class="model-select"
-                      value={modelOptions[i].includes(ep.model) ? ep.model : ''}
-                      on:change={(e) => {
-                        config.api.endpoints[i].model = e.currentTarget.value;
-                        config.api.endpoints = config.api.endpoints;
-                      }}
-                    >
-                      <option value="" disabled>从 {modelOptions[i].length} 个模型中选择…</option>
-                      {#each modelOptions[i] as m}
-                        <option value={m}>{m}</option>
-                      {/each}
-                    </select>
-                  {/if}
                   {#if modelMsg[i]}
                     <span class="model-msg" class:err={modelMsg[i].includes('失败')}>{modelMsg[i]}</span>
                   {/if}
@@ -316,7 +361,6 @@
     background: #fff;
     border-radius: 14px;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 16px rgba(0, 0, 0, 0.04);
-    overflow: hidden;
   }
 
   .sec-head {
@@ -326,6 +370,7 @@
     padding: 16px 20px;
     border-bottom: 1px solid #f0f1f4;
     background: #fafbfc;
+    border-radius: 14px 14px 0 0;
   }
 
   h2 {
@@ -443,22 +488,73 @@
     flex: 1;
   }
 
-  .model-select {
-    font-size: 13px;
-    padding: 9px 11px;
-    border: 1px solid #d8dbe2;
-    border-radius: 9px;
-    background: #fff;
-    color: #1a1a1a;
-    font-family: inherit;
-    width: 100%;
-    cursor: pointer;
+  /* 组合框：单输入框 + 下拉 */
+  .combo {
+    position: relative;
+    flex: 1;
+    display: flex;
   }
 
-  .model-select:focus {
-    outline: none;
-    border-color: #4f6bed;
-    box-shadow: 0 0 0 3px rgba(79, 107, 237, 0.12);
+  .combo input {
+    flex: 1;
+    padding-right: 30px;
+  }
+
+  .combo-toggle {
+    position: absolute;
+    right: 1px;
+    top: 1px;
+    bottom: 1px;
+    width: 28px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: #8a909c;
+    font-size: 12px;
+    cursor: pointer;
+    border-radius: 0 8px 8px 0;
+  }
+
+  .combo-toggle:hover {
+    color: #4f6bed;
+  }
+
+  .combo-list {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    margin: 0;
+    padding: 4px;
+    list-style: none;
+    background: #fff;
+    border: 1px solid #d8dbe2;
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    max-height: 220px;
+    overflow-y: auto;
+    z-index: 20;
+  }
+
+  .combo-list li {
+    padding: 7px 10px;
+    font-size: 13px;
+    color: #2b2f38;
+    border-radius: 7px;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .combo-list li:hover {
+    background: #f0f2f8;
+  }
+
+  .combo-list li.active {
+    background: #eef1fd;
+    color: #4f6bed;
+    font-weight: 600;
   }
 
   .query {

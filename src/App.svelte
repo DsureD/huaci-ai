@@ -3,7 +3,12 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { getCurrentWindow } from '@tauri-apps/api/window';
+  import { writeText } from '@tauri-apps/plugin-clipboard-manager';
+  import { open } from '@tauri-apps/plugin-shell';
+  import { marked } from 'marked';
   import Settings from './Settings.svelte';
+
+  marked.setOptions({ breaks: true, gfm: true });
 
   const view = new URLSearchParams(window.location.search).get('view');
   const isSettings = view === 'settings';
@@ -19,6 +24,10 @@
   let isLoading = false;
   let currentAction: 'translate' | 'explain' = 'translate';
   let rootEl: HTMLElement;
+  let pinned = false; // 钉住：不随失焦自动关闭
+  let copied = false;
+
+  $: renderedHtml = resultText ? (marked.parse(resultText) as string) : '';
 
   // 根据内容把窗口调整为刚好包住内容的大小（交给 Rust 设置，避免前端 DPI 计算出错）
   async function resizeToContent() {
@@ -39,7 +48,7 @@
   // 内容变化时重新测量
   $: if (!isSettings && rootEl) {
     void mode;
-    void resultText;
+    void renderedHtml;
     void isLoading;
     resizeToContent();
   }
@@ -57,10 +66,11 @@
         selectedText = text;
         mode = 'toolbar';
         resultText = '';
+        pinned = false;
 
         const [x, y] = event.payload ?? [0, 0];
         await invoke('show_popup', { x, y });
-        // 显示后再按内容收紧尺寸
+        // 显示后再按内容收紧尺寸 + 钳进屏幕
         await resizeToContent();
 
         // 如果开启了自动翻译，直接执行
@@ -72,9 +82,9 @@
       }
     });
 
-    // 点击窗口外部（弹窗失去焦点）自动关闭
+    // 点击窗口外部（弹窗失去焦点）自动关闭；钉住时保持
     await currentWin.onFocusChanged(({ payload: focused }) => {
-      if (!focused) closeWindow();
+      if (!focused && !pinned) closeWindow();
     });
 
     // 按 ESC 关闭
@@ -103,10 +113,44 @@
     }
   }
 
+  // 拖动窗口（点在标题栏空白处时）
+  function startDrag(e: MouseEvent) {
+    if ((e.target as HTMLElement).closest('button')) return;
+    getCurrentWindow().startDragging();
+  }
+
+  async function togglePin() {
+    pinned = !pinned;
+    try {
+      await getCurrentWindow().setAlwaysOnTop(true);
+    } catch {}
+  }
+
+  async function copyResult() {
+    try {
+      await writeText(resultText);
+      copied = true;
+      setTimeout(() => (copied = false), 1500);
+    } catch (e) {
+      console.error('复制失败:', e);
+    }
+  }
+
+  // 拦截 Markdown 中的链接点击，改用系统浏览器打开，避免 webview 跳转毁掉界面
+  function onResultClick(e: MouseEvent) {
+    const a = (e.target as HTMLElement).closest('a');
+    if (a && a.getAttribute('href')) {
+      e.preventDefault();
+      open(a.getAttribute('href') as string).catch(() => {});
+    }
+  }
+
   async function closeWindow() {
     selectedText = '';
     resultText = '';
     mode = 'toolbar';
+    pinned = false;
+    copied = false;
     await invoke('hide_popup');
   }
 </script>
@@ -135,18 +179,48 @@
       </div>
     {:else}
       <div class="result-card">
-        <div class="card-head">
+        <div class="card-head" on:mousedown={startDrag} role="toolbar" tabindex="-1">
           <span class="badge" class:explain={currentAction === 'explain'}>
             {currentAction === 'translate' ? '翻译' : '解释'}
           </span>
-          <button class="mini-close" on:click={closeWindow} aria-label="关闭">×</button>
+          <div class="head-actions">
+            <button
+              class="icon-btn"
+              class:active={pinned}
+              on:click={togglePin}
+              title={pinned ? '取消置顶' : '钉住（保持显示并置顶）'}
+              aria-label="置顶"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 17v5" />
+                <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
+              </svg>
+            </button>
+            <button class="icon-btn" on:click={copyResult} title="复制内容" aria-label="复制" disabled={isLoading || !resultText}>
+              {#if copied}
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M20 6 9 17l-5-5" />
+                </svg>
+              {:else}
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+              {/if}
+            </button>
+            <button class="icon-btn" on:click={closeWindow} title="关闭" aria-label="关闭">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <path d="M18 6 6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
         </div>
         {#if isLoading}
           <div class="loading-dots">
             <span></span><span></span><span></span>
           </div>
         {:else}
-          <div class="result-text">{resultText}</div>
+          <div class="result-text" on:click={onResultClick}>{@html renderedHtml}</div>
         {/if}
       </div>
     {/if}
@@ -167,8 +241,7 @@
     overflow: hidden;
   }
 
-  /* 内容容器：宽高随内容自适应（窗口被 Rust 设为同样大小）
-     留一点点内边距给阴影，营造悬浮感但不显空旷 */
+  /* 内容容器：宽高随内容自适应（窗口被 Rust 设为同样大小） */
   .popup {
     display: inline-block;
     padding: 8px;
@@ -238,7 +311,7 @@
   /* 翻译结果卡片 */
   .result-card {
     width: 360px;
-    padding: 10px 12px 12px;
+    padding: 8px 12px 12px;
     background: rgba(252, 252, 253, 0.97);
     backdrop-filter: blur(24px) saturate(180%);
     border: 1px solid rgba(0, 0, 0, 0.1);
@@ -252,6 +325,8 @@
     align-items: center;
     justify-content: space-between;
     margin-bottom: 8px;
+    cursor: move;
+    user-select: none;
   }
 
   .badge {
@@ -269,18 +344,52 @@
     background: rgba(217, 119, 6, 0.12);
   }
 
+  .head-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+
+  .icon-btn {
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: #6a707c;
+    cursor: pointer;
+    border-radius: 7px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s, color 0.15s;
+  }
+
+  .icon-btn:hover:not(:disabled) {
+    background: rgba(0, 0, 0, 0.07);
+    color: #1a1a1a;
+  }
+
+  .icon-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+
+  .icon-btn.active {
+    background: rgba(79, 107, 237, 0.14);
+    color: #4f6bed;
+  }
+
   .result-text {
     margin: 0;
     font-size: 14px;
     line-height: 1.65;
     color: #1a1a1a;
-    white-space: pre-wrap;
     word-break: break-word;
     overflow-wrap: anywhere;
     max-height: 380px;
     overflow-y: auto;
     overflow-x: hidden;
-    /* Firefox 滚动条 */
     scrollbar-width: thin;
     scrollbar-color: rgba(0, 0, 0, 0.18) transparent;
   }
@@ -300,6 +409,85 @@
 
   .result-text::-webkit-scrollbar-thumb:hover {
     background: rgba(0, 0, 0, 0.3);
+  }
+
+  /* Markdown 渲染样式（@html 内容需用 :global） */
+  .result-text :global(p) {
+    margin: 0 0 8px;
+  }
+  .result-text :global(p:last-child) {
+    margin-bottom: 0;
+  }
+  .result-text :global(h1),
+  .result-text :global(h2),
+  .result-text :global(h3),
+  .result-text :global(h4) {
+    margin: 10px 0 6px;
+    font-size: 15px;
+    font-weight: 700;
+    line-height: 1.3;
+  }
+  .result-text :global(h1) {
+    font-size: 17px;
+  }
+  .result-text :global(ul),
+  .result-text :global(ol) {
+    margin: 4px 0 8px;
+    padding-left: 20px;
+  }
+  .result-text :global(li) {
+    margin: 2px 0;
+  }
+  .result-text :global(code) {
+    background: rgba(0, 0, 0, 0.06);
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-family: 'SFMono-Regular', Consolas, monospace;
+    font-size: 12.5px;
+  }
+  .result-text :global(pre) {
+    background: rgba(0, 0, 0, 0.05);
+    padding: 10px 12px;
+    border-radius: 8px;
+    overflow-x: auto;
+    margin: 6px 0 10px;
+  }
+  .result-text :global(pre code) {
+    background: none;
+    padding: 0;
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+  .result-text :global(blockquote) {
+    margin: 6px 0;
+    padding: 2px 12px;
+    border-left: 3px solid rgba(79, 107, 237, 0.4);
+    color: #555;
+  }
+  .result-text :global(a) {
+    color: #4f6bed;
+    text-decoration: none;
+  }
+  .result-text :global(a:hover) {
+    text-decoration: underline;
+  }
+  .result-text :global(strong) {
+    font-weight: 700;
+  }
+  .result-text :global(hr) {
+    border: none;
+    border-top: 1px solid rgba(0, 0, 0, 0.1);
+    margin: 10px 0;
+  }
+  .result-text :global(table) {
+    border-collapse: collapse;
+    margin: 6px 0;
+    font-size: 13px;
+  }
+  .result-text :global(th),
+  .result-text :global(td) {
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    padding: 4px 8px;
   }
 
   .loading-dots {
@@ -337,27 +525,5 @@
       transform: scale(1);
       opacity: 1;
     }
-  }
-
-  .mini-close {
-    width: 22px;
-    height: 22px;
-    padding: 0;
-    border: none;
-    background: rgba(0, 0, 0, 0.05);
-    color: #666;
-    font-size: 15px;
-    line-height: 1;
-    cursor: pointer;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: background 0.15s, color 0.15s;
-  }
-
-  .mini-close:hover {
-    background: rgba(0, 0, 0, 0.12);
-    color: #333;
   }
 </style>

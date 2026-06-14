@@ -100,13 +100,33 @@ pub fn hide_popup(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-// 根据内容把悬浮窗调整为合适大小（逻辑像素），消除多余透明空白
+// 根据内容把悬浮窗调整为合适大小（逻辑像素），消除多余透明空白，
+// 并保证窗口完整落在显示器工作区内（屏幕底部/右侧自动上移、左移）
 #[tauri::command]
 pub fn resize_popup(app: AppHandle, width: f64, height: f64) -> Result<(), String> {
     if let Some(win) = app.get_webview_window("main") {
         let w = width.clamp(80.0, 900.0);
         let h = height.clamp(40.0, 700.0);
         win.set_size(LogicalSize::new(w, h)).map_err(|e| e.to_string())?;
+
+        // 把窗口钳制进当前显示器的工作区（排除任务栏）
+        if let Ok(Some(monitor)) = win.current_monitor() {
+            let scale = monitor.scale_factor();
+            let area = monitor.work_area();
+            let ap = area.position.to_physical::<i32>(scale);
+            let asz = area.size.to_physical::<i32>(scale);
+            if let (Ok(win_size), Ok(pos)) = (win.outer_size(), win.outer_position()) {
+                let min_x = ap.x;
+                let min_y = ap.y;
+                let max_x = (ap.x + asz.width - win_size.width as i32).max(min_x);
+                let max_y = (ap.y + asz.height - win_size.height as i32).max(min_y);
+                let nx = pos.x.clamp(min_x, max_x);
+                let ny = pos.y.clamp(min_y, max_y);
+                if nx != pos.x || ny != pos.y {
+                    let _ = win.set_position(PhysicalPosition::new(nx, ny));
+                }
+            }
+        }
     }
     Ok(())
 }
