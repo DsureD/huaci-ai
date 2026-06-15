@@ -1,6 +1,6 @@
 [package]
 name = "huaci-ai"
-version = "0.1.0"
+version = "1.0.0"
 description = "轻量级划词翻译工具"
 authors = ["huaci-ai"]
 edition = "2021"
@@ -9,7 +9,7 @@ edition = "2021"
 tauri-build = { version = "2.0", features = [] }
 
 [dependencies]
-tauri = { version = "2.0", features = ["tray-icon"] }
+tauri = { version = "2.0", features = ["tray-icon", "image-ico"] }
 tauri-plugin-clipboard-manager = "2.0"
 tauri-plugin-shell = "2.0"
 tauri-plugin-global-shortcut = "2.0"

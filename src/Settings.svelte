@@ -38,12 +38,37 @@
   let tab: 'api' | 'features' | 'about' = 'api';
   let appVersion = '';
   let hotkeyStatus: { toggle: boolean; manual: boolean } = { toggle: false, manual: false };
+  // 划词监听总开关：即时生效的运行时状态，独立于 config，不随「保存」
+  let captureEnabled = true; // 默认开启，与后端一致
+  let captureBusy = false;
 
   async function loadHotkeyStatus() {
     try {
       hotkeyStatus = await invoke<{ toggle: boolean; manual: boolean }>('get_hotkey_status');
     } catch (e) {
       console.error('查询快捷键状态失败:', e);
+    }
+  }
+
+  async function loadCaptureStatus() {
+    try {
+      captureEnabled = await invoke<boolean>('get_capture_status');
+    } catch (e) {
+      console.error('查询划词状态失败:', e);
+    }
+  }
+
+  async function toggleCapture() {
+    if (captureBusy) return;
+    const next = !captureEnabled;
+    captureBusy = true;
+    try {
+      await invoke('toggle_capture', { enabled: next });
+      captureEnabled = next;
+    } catch (e) {
+      console.error('切换划词失败:', e);
+    } finally {
+      captureBusy = false;
     }
   }
 
@@ -59,6 +84,7 @@
       appVersion = '';
     }
     await loadHotkeyStatus();
+    await loadCaptureStatus();
   });
 
   function addEndpoint() {
@@ -193,7 +219,7 @@
   }
 </script>
 
-<svelte:window on:mousedown={onWindowMouseDown} />
+<svelte:window on:mousedown={onWindowMouseDown} on:focus={loadCaptureStatus} />
 
 <div class="page">
   {#if !config}
@@ -323,6 +349,27 @@
       {/if}
 
       {#if tab === 'features'}
+      <section class="capture-section">
+        <button
+          type="button"
+          class="capture-card"
+          class:off={!captureEnabled}
+          on:click={toggleCapture}
+          disabled={captureBusy}
+          role="switch"
+          aria-checked={captureEnabled}
+        >
+          <span class="cap-badge">
+            <Icon name="translate" size={22} />
+          </span>
+          <span class="cap-text">
+            <span class="cap-title">划词监听</span>
+            <span class="cap-sub">{captureEnabled ? '已开启 · 选中文本即可唤起翻译' : '已关闭 · 划词不会触发'}</span>
+          </span>
+          <span class="ios-switch" aria-hidden="true"><span class="knob"></span></span>
+        </button>
+      </section>
+
       <section>
         <div class="sec-head">
           <h2>快捷键</h2>
@@ -1042,6 +1089,111 @@
     border-radius: 5px;
     font-size: 12px;
     font-family: 'SFMono-Regular', Consolas, monospace;
+  }
+
+  /* ===== 划词监听总开关 ===== */
+  .capture-section {
+    padding: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .capture-card {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 18px 20px;
+    border-radius: 14px;
+    text-align: left;
+    background: linear-gradient(135deg, #4f6bed, #6a83f3);
+    box-shadow: 0 4px 16px rgba(79, 107, 237, 0.28);
+    transition: background 0.2s, box-shadow 0.2s, opacity 0.15s;
+  }
+
+  .capture-card.off {
+    background: #f3f4f7;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 16px rgba(0, 0, 0, 0.04);
+  }
+
+  .capture-card:disabled {
+    opacity: 0.7;
+    cursor: default;
+  }
+
+  .cap-badge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    flex: none;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.22);
+    color: #fff;
+  }
+
+  .capture-card.off .cap-badge {
+    background: #e4e7ee;
+    color: #9aa0ac;
+  }
+
+  .cap-text {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .cap-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: #fff;
+  }
+
+  .capture-card.off .cap-title {
+    color: #2b2f38;
+  }
+
+  .cap-sub {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.85);
+  }
+
+  .capture-card.off .cap-sub {
+    color: #9aa0ac;
+  }
+
+  /* iOS 风格滑动开关（纯展示，状态由外层 .capture-card 承载） */
+  .ios-switch {
+    position: relative;
+    flex: none;
+    width: 50px;
+    height: 30px;
+    border-radius: 15px;
+    background: rgba(255, 255, 255, 0.35);
+    transition: background 0.2s;
+  }
+
+  .capture-card.off .ios-switch {
+    background: #cfd4de;
+  }
+
+  .ios-switch .knob {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+    transition: transform 0.2s;
+  }
+
+  .capture-card:not(.off) .ios-switch .knob {
+    transform: translateX(20px);
   }
 
   .loading {

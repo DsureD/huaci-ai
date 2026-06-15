@@ -174,7 +174,7 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut) {
         if shortcut == &sc {
             let new_state = !mouse_hook::is_capture_enabled();
             mouse_hook::set_capture_enabled(new_state);
-            crate::sync_toggle_text(new_state); // 同步托盘菜单文字，让切换可见
+            crate::sync_capture_state(new_state); // 同步托盘文字 + 图标，让切换可见
             return;
         }
     }
@@ -193,10 +193,11 @@ pub fn load_config(state: State<'_, AppState>) -> Result<config::Config, String>
     Ok(state.config.lock().unwrap().clone())
 }
 
-// 切换划词捕获
+// 切换划词捕获（设置页开关调用）
 #[tauri::command]
 pub fn toggle_capture(enabled: bool) -> Result<bool, String> {
     mouse_hook::set_capture_enabled(enabled);
+    crate::sync_capture_state(enabled); // 同步托盘文字 + 图标
     Ok(enabled)
 }
 

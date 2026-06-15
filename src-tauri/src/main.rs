@@ -19,17 +19,29 @@ use tauri::{
 };
 use tauri_plugin_global_shortcut::ShortcutState;
 
-// 托盘里的「启用/禁用划词监听」菜单项，供快捷键切换捕获后同步文字
+// 托盘里的「启用/禁用划词监听」菜单项，供切换捕获后同步文字
 pub static TOGGLE_MENU_ITEM: OnceLock<MenuItem<tauri::Wry>> = OnceLock::new();
+// 托盘图标句柄，供切换捕获后同步图标（启用=彩色，禁用=灰色）
+pub static TRAY_ICON: OnceLock<TrayIcon<tauri::Wry>> = OnceLock::new();
 
-// 切换捕获状态后同步托盘菜单文字（托盘与快捷键共用这一处逻辑）
-pub fn sync_toggle_text(enabled: bool) {
+// 托盘图标资源：编译期内嵌，切换时无需读取运行目录下的外部文件
+const ICON_ACTIVE: &[u8] = include_bytes!("../icons/icon.ico");
+const ICON_DISABLED: &[u8] = include_bytes!("../icons/icon-gray.ico");
+
+// 切换捕获状态后同步托盘：菜单文字 + 图标（托盘 / 快捷键 / 设置页共用这一处逻辑）
+pub fn sync_capture_state(enabled: bool) {
     if let Some(item) = TOGGLE_MENU_ITEM.get() {
         let _ = item.set_text(if enabled {
             "禁用划词监听"
         } else {
             "启用划词监听"
         });
+    }
+    if let Some(tray) = TRAY_ICON.get() {
+        let bytes = if enabled { ICON_ACTIVE } else { ICON_DISABLED };
+        if let Ok(icon) = tauri::image::Image::from_bytes(bytes) {
+            let _ = tray.set_icon(Some(icon));
+        }
     }
 }
 
@@ -73,9 +85,7 @@ fn main() {
             let menu =
                 Menu::with_items(app, &[&toggle_item, &settings_item, &sep, &quit_item])?;
 
-            // 把可变菜单项交给闭包持有，便于动态更新文字
-            let toggle_handle = toggle_item.clone();
-            // 同一菜单项存入全局，供快捷键切换捕获时同步文字
+            // 菜单项存入全局，供托盘 / 快捷键 / 设置页切换捕获时同步文字与图标
             let _ = TOGGLE_MENU_ITEM.set(toggle_item.clone());
 
             // 创建托盘图标（复用应用图标，避免出现“透明无图标”的托盘）
@@ -84,14 +94,9 @@ fn main() {
                 .menu(&menu)
                 .on_menu_event(move |app, event| match event.id().as_ref() {
                     "toggle" => {
-                        let current = mouse_hook::is_capture_enabled();
-                        mouse_hook::set_capture_enabled(!current);
-                        // 更新菜单文字
-                        let _ = toggle_handle.set_text(if !current {
-                            "禁用划词监听"
-                        } else {
-                            "启用划词监听"
-                        });
+                        let new_state = !mouse_hook::is_capture_enabled();
+                        mouse_hook::set_capture_enabled(new_state);
+                        sync_capture_state(new_state); // 文字 + 图标一起同步
                     }
                     "settings" => {
                         open_settings_window(app);
@@ -123,7 +128,9 @@ fn main() {
                 tray_builder = tray_builder.icon(icon.clone());
             }
 
-            let _tray = tray_builder.build(app)?;
+            let tray = tray_builder.build(app)?;
+            // 句柄存入全局，供切换捕获时更换图标（启动时捕获默认开启，沿用彩色图标）
+            let _ = TRAY_ICON.set(tray);
 
             // 安装全局鼠标钩子
             if let Err(e) = mouse_hook::install_mouse_hook(app.handle().clone()) {
