@@ -39,6 +39,8 @@
   let pinned = false; // 钉住：不随失焦自动关闭
   let copied = false;
   let dragging = false; // 拖动中：临时屏蔽失焦关闭
+  let popupAnchor: [number, number] = [0, 0]; // 最近一次划词锚点，切换到结果框时复用以原位重显
+  let switching = false; // 工具条→结果框切换中：先隐藏旧帧再显示，期间屏蔽失焦/点外关闭
 
   $: renderedHtml = resultText ? (marked.parse(resultText) as string) : '';
 
@@ -64,6 +66,7 @@
     void renderedHtml;
     void resultEndpoint;
     void isLoading;
+    void loadingStatus;
     resizeToContent();
   }
 
@@ -100,6 +103,7 @@
         pinned = false;
 
         const [x, y] = event.payload ?? [0, 0];
+        popupAnchor = [x, y];
         await invoke('show_popup', { x, y });
         // 显示后再按内容收紧尺寸 + 钳进屏幕
         await resizeToContent();
@@ -123,7 +127,7 @@
 
     // 弹窗不抢焦点，靠后端全局点击：点到窗口之外时通知关闭
     await listen('close-popup', () => {
-      if (!pinned && !dragging) closeWindow();
+      if (!pinned && !dragging && !switching) closeWindow();
     });
 
     // 失焦自动关闭（用户与弹窗交互、使其获得焦点后才会触发）；钉住或拖动中时保持
@@ -132,7 +136,7 @@
         dragging = false;
         return;
       }
-      if (!pinned && !dragging) closeWindow();
+      if (!pinned && !dragging && !switching) closeWindow();
     });
 
     // 拖动结束（松开鼠标）后解除屏蔽
@@ -157,13 +161,23 @@
 
   async function doTranslate(action: ActionItem) {
     currentAction = action;
-    mode = 'result';
-    isLoading = true;
-    loadingStatus = '';
-    resultText = '';
-    resultEndpoint = '';
-    resultModel = '';
-    await resizeToContent();
+    // 先隐藏弹窗，把「工具条」这一帧从屏幕上彻底擦掉，避免它与结果框在透明窗口上重叠残留(tauri#12800)。
+    // 切换期间屏蔽失焦/点外关闭，以免 hide 触发误关。
+    switching = true;
+    try {
+      await invoke('hide_popup');
+      mode = 'result';
+      isLoading = true;
+      loadingStatus = '';
+      resultText = '';
+      resultEndpoint = '';
+      resultModel = '';
+      await tick(); // 等 DOM 切到结果框，确保重新显示的是结果框而非旧的工具条
+      await invoke('show_popup', { x: popupAnchor[0], y: popupAnchor[1] });
+      await resizeToContent();
+    } finally {
+      switching = false;
+    }
 
     try {
       const result = await invoke<{ text: string; endpoint_name: string; model: string }>('translate_text', {
@@ -195,11 +209,12 @@
     getCurrentWindow().startDragging();
   }
 
-  async function togglePin() {
+  // 钉住=不随失焦/点击外部自动关闭（见 onFocusChanged 与 close-popup 里的 !pinned 判断）。
+  // 窗口本身已是 alwaysOnTop（tauri.conf + show_popup 的原生 HWND_TOPMOST），无需再设置；
+  // 之前调 setAlwaysOnTop 会激活这个「不抢焦点」的无边框弹窗，与全局鼠标钩子冲突，
+  // 导致点击置顶时界面卡死、弹窗消失。这里只切 JS 状态即可。
+  function togglePin() {
     pinned = !pinned;
-    try {
-      await getCurrentWindow().setAlwaysOnTop(true);
-    } catch {}
   }
 
   async function copyResult() {
