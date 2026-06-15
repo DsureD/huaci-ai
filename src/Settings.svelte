@@ -97,6 +97,15 @@
     config.actions = config.actions.filter((_, i) => i !== index);
   }
 
+  // 「自动」互斥：同时只能有一个功能勾选自动执行，勾选某项时自动取消其它项
+  function setAuto(i: number, checked: boolean) {
+    if (!config) return;
+    config.actions = config.actions.map((a, idx) => ({
+      ...a,
+      auto: checked ? idx === i : idx === i ? false : a.auto,
+    }));
+  }
+
   function pickIcon(i: number, key: string) {
     if (!config) return;
     config.actions[i].icon = key;
@@ -328,7 +337,10 @@
             </div>
           </div>
           <div class="field-row">
-            <span class="field-label">手动翻译（在光标处弹出）</span>
+            <div class="field-label-wrap">
+              <span class="field-label">快速操作</span>
+              <span class="field-sub">在鼠标光标处弹出划词菜单</span>
+            </div>
             <div class="hotkey-cell">
               <input class="hotkey-input" bind:value={config.hotkeys.manual_translate} placeholder="Ctrl+Q" />
               <span class="hk-status" class:ok={hotkeyStatus.manual}>{hotkeyStatus.manual ? '已生效' : '未生效 · 可能被占用'}</span>
@@ -340,7 +352,7 @@
       <section>
         <div class="sec-head">
           <h2>划词功能</h2>
-          <span class="sec-desc">弹窗里的功能按钮，「自动」表示划词后直接执行，用 <code>{'{text}'}</code> 代表选中文本</span>
+          <span class="sec-desc">功能列表，「自动」表示划词后直接执行，用 <code>{'{text}'}</code> 代表选中文本</span>
         </div>
         <div class="sec-body">
           <div class="field-row trigger-row">
@@ -361,8 +373,8 @@
                   <Icon name={act.icon} size={18} />
                 </button>
                 <input class="action-name" bind:value={act.name} placeholder="功能名称" />
-                <label class="switch" title="划词选中后自动执行此功能">
-                  <input type="checkbox" bind:checked={act.auto} />
+                <label class="switch" title="划词选中后自动执行此功能（只能有一个）">
+                  <input type="checkbox" checked={act.auto} on:change={(e) => setAuto(i, e.currentTarget.checked)} />
                   <span>自动</span>
                 </label>
                 <label class="switch">
@@ -397,7 +409,7 @@
       {#if tab === 'about'}
       <section>
         <div class="sec-head">
-          <h2>关于</h2>
+          <h2>软件信息</h2>
         </div>
         <div class="sec-body about">
           <div class="about-logo">划词AI</div>
@@ -614,6 +626,7 @@
 
   .switch {
     display: flex;
+    flex-direction: row;
     align-items: center;
     gap: 6px;
     font-size: 13px;
@@ -820,6 +833,19 @@
     font-size: 13px;
     color: #2b2f38;
     font-weight: 500;
+  }
+
+  /* 标签 + 下方小字说明 */
+  .field-label-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .field-sub {
+    font-size: 11px;
+    color: #9aa0ac;
+    font-weight: 400;
   }
 
   .field-row input[type='number'] {

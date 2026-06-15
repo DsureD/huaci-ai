@@ -25,13 +25,22 @@ pub async fn translate_with_failover(
 
     for (idx, endpoint) in endpoints.iter().enumerate() {
         on_progress(idx + 1, total, &endpoint.name);
-        match translator::translate_text(text, endpoint, prompt_template, proxy, timeout).await {
-            Ok(result) => {
+        // 双重超时：reqwest 自身设了 timeout，外层再套一个硬上限 tokio::time::timeout，
+        // 即使底层请求因某些原因（代理挂起、连接半开等）没在 reqwest 超时内返回，
+        // 也会被这里强制中断并转移到下一个接口，避免永远卡在「正在请求 …」。
+        let fut = translator::translate_text(text, endpoint, prompt_template, proxy, timeout);
+        match tokio::time::timeout(timeout, fut).await {
+            Ok(Ok(result)) => {
                 println!("✓ 接口 {} 调用成功", endpoint.name);
                 return Ok((result, endpoint.clone()));
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 eprintln!("✗ 接口 {} 失败: {}", endpoint.name, e);
+                last_error = Some(e);
+            }
+            Err(_) => {
+                let e = anyhow::anyhow!("接口 {} 请求超时（{} 秒）", endpoint.name, timeout.as_secs());
+                eprintln!("✗ {}", e);
                 last_error = Some(e);
             }
         }

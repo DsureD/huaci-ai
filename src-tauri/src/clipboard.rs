@@ -23,14 +23,10 @@ pub fn get_selected_text(app: &AppHandle) -> anyhow::Result<(String, Option<Stri
     // 读取新内容
     let new_clipboard = app.clipboard().read_text().ok();
 
-    // 严格判断:新内容非空 且 与旧内容不同 且 长度≥2(排除单字符误触发)
-    let selected_text = match (&old_clipboard, &new_clipboard) {
-        (Some(old), Some(new)) if new.trim() != old.trim() && new.trim().len() >= 2 => {
-            new.trim().to_string()
-        }
-        (None, Some(new)) if new.trim().len() >= 2 => {
-            new.trim().to_string()
-        }
+    // 取词动作（拖选/双击）已确认存在选区，这里只要 Ctrl+C 拿到非空内容（长度≥2，排除单字符误触发）
+    // 就视为选中文本——即便它与旧剪贴板相同也照常弹窗（修复“划词内容与剪贴板一致时不弹窗”）。
+    let selected_text = match &new_clipboard {
+        Some(new) if new.trim().chars().count() >= 2 => new.trim().to_string(),
         _ => String::new(),
     };
 
