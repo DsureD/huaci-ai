@@ -22,7 +22,7 @@ use tauri_plugin_global_shortcut::ShortcutState;
 // 托盘里的「启用/禁用划词监听」菜单项，供切换捕获后同步文字
 pub static TOGGLE_MENU_ITEM: OnceLock<MenuItem<tauri::Wry>> = OnceLock::new();
 // 托盘图标句柄，供切换捕获后同步图标（启用=彩色，禁用=灰色）
-pub static TRAY_ICON: OnceLock<TrayIcon<tauri::Wry>> = OnceLock::new();
+pub static TRAY_ICON: OnceLock<tauri::tray::TrayIcon<tauri::Wry>> = OnceLock::new();
 
 // 托盘图标资源：编译期内嵌，切换时无需读取运行目录下的外部文件
 const ICON_ACTIVE: &[u8] = include_bytes!("../icons/icon.ico");
