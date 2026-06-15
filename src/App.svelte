@@ -99,7 +99,12 @@
       }
     });
 
-    // 点击窗口外部（弹窗失去焦点）自动关闭；钉住或拖动中时保持
+    // 弹窗不抢焦点，靠后端全局点击：点到窗口之外时通知关闭
+    await listen('close-popup', () => {
+      if (!pinned && !dragging) closeWindow();
+    });
+
+    // 失焦自动关闭（用户与弹窗交互、使其获得焦点后才会触发）；钉住或拖动中时保持
     await currentWin.onFocusChanged(({ payload: focused }) => {
       if (focused) {
         dragging = false;

@@ -3,6 +3,13 @@ use serde::Serialize;
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, State, WebviewUrl, WebviewWindowBuilder};
+#[cfg(target_os = "windows")]
+use windows::Win32::Foundation::HWND;
+#[cfg(target_os = "windows")]
+use windows::Win32::UI::WindowsAndMessaging::{
+    SetWindowPos, ShowWindow, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SW_HIDE,
+    SW_SHOWNOACTIVATE,
+};
 
 // 全局配置状态
 pub struct AppState {
@@ -108,11 +115,43 @@ pub fn show_popup(app: AppHandle, x: i32, y: i32) -> Result<(), String> {
     if let Some(win) = app.get_webview_window("main") {
         // 让窗口出现在鼠标右下方，避免遮住选中文字
         let _ = win.set_position(PhysicalPosition::new(x + 12, y + 12));
-        win.show().map_err(|e| e.to_string())?;
-        let _ = win.set_always_on_top(true);
-        // 取词已在显示前完成（UIA 优先，必要时回退 Ctrl+C），不再依赖原程序保持焦点，
-        // 因此这里放心抢占焦点，使 ESC、失焦自动关闭、关闭按钮等交互都正常工作。
-        let _ = win.set_focus();
+
+        // 不抢占原程序焦点：否则用户选中的文本会失去焦点，无法复制/删除/编辑。
+        // 取词已在显示前完成（UIA 优先，必要时回退 Ctrl+C），本窗口无需持有焦点；
+        // 关闭改由全局点击驱动（mouse_hook 检测到点窗口外会发 close-popup）。
+        #[cfg(target_os = "windows")]
+        {
+            match win.hwnd() {
+                Ok(h) => {
+                    mouse_hook::set_popup_hwnd(h.0 as isize);
+                    unsafe {
+                        let hwnd = HWND(h.0 as _);
+                        let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+                        // 置顶但不激活
+                        let _ = SetWindowPos(
+                            hwnd,
+                            HWND_TOPMOST,
+                            0,
+                            0,
+                            0,
+                            0,
+                            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                        );
+                    }
+                }
+                Err(_) => {
+                    win.show().map_err(|e| e.to_string())?;
+                    let _ = win.set_always_on_top(true);
+                }
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            win.show().map_err(|e| e.to_string())?;
+            let _ = win.set_always_on_top(true);
+        }
+
+        mouse_hook::set_popup_visible(true);
     }
     Ok(())
 }
@@ -121,7 +160,23 @@ pub fn show_popup(app: AppHandle, x: i32, y: i32) -> Result<(), String> {
 #[tauri::command]
 pub fn hide_popup(app: AppHandle) -> Result<(), String> {
     if let Some(win) = app.get_webview_window("main") {
-        win.hide().map_err(|e| e.to_string())?;
+        mouse_hook::set_popup_visible(false);
+        // 用原生 SW_HIDE 隐藏，与 show_popup 的原生显示保持一致，避免可见状态不同步
+        #[cfg(target_os = "windows")]
+        {
+            match win.hwnd() {
+                Ok(h) => unsafe {
+                    let _ = ShowWindow(HWND(h.0 as _), SW_HIDE);
+                },
+                Err(_) => {
+                    win.hide().map_err(|e| e.to_string())?;
+                }
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            win.hide().map_err(|e| e.to_string())?;
+        }
     }
     Ok(())
 }
