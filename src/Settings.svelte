@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
+  import { getVersion } from '@tauri-apps/api/app';
   import Icon from './Icon.svelte';
   import { ICONS } from './icons';
 
@@ -33,12 +34,19 @@
   let config: Config | null = null;
   let status = '';
   let saving = false;
+  let tab: 'api' | 'features' | 'about' = 'api';
+  let appVersion = '';
 
   onMount(async () => {
     try {
       config = await invoke<Config>('load_config');
     } catch (e) {
       status = '加载配置失败: ' + e;
+    }
+    try {
+      appVersion = await getVersion();
+    } catch {
+      appVersion = '';
     }
   });
 
@@ -64,7 +72,6 @@
 
   // ===== 划词功能项 =====
   let iconPickerOpen: Record<number, boolean> = {};
-  let dragIndex: number | null = null;
 
   function addAction() {
     if (!config) return;
@@ -87,24 +94,11 @@
     iconPickerOpen = iconPickerOpen;
   }
 
-  function onActionDrop(target: number) {
-    if (!config || dragIndex === null || dragIndex === target) {
-      dragIndex = null;
-      return;
-    }
-    const arr = [...config.actions];
-    const [moved] = arr.splice(dragIndex, 1);
-    arr.splice(target, 0, moved);
-    config.actions = arr;
-    dragIndex = null;
-  }
-
   // 模型查询状态（按接口索引）
   let modelOptions: Record<number, string[]> = {};
   let modelLoading: Record<number, boolean> = {};
   let modelMsg: Record<number, string> = {};
   let modelOpen: Record<number, boolean> = {};
-  let comboRefs: Record<number, HTMLDivElement> = {};  // 记录每个输入框的引用,用于定位下拉
 
   async function queryModels(i: number) {
     if (!config) return;
@@ -183,7 +177,14 @@
       </div>
     </header>
 
+    <nav class="tabs">
+      <button class="tab" class:active={tab === 'api'} on:click={() => (tab = 'api')}>API</button>
+      <button class="tab" class:active={tab === 'features'} on:click={() => (tab = 'features')}>功能</button>
+      <button class="tab" class:active={tab === 'about'} on:click={() => (tab = 'about')}>关于</button>
+    </nav>
+
     <div class="settings">
+      {#if tab === 'api'}
       <section>
         <div class="sec-head">
           <h2>API 接口</h2>
@@ -209,7 +210,7 @@
                 <div class="full model-field">
                   <span class="label-text">模型</span>
                   <div class="model-row">
-                    <div class="combo" bind:this={comboRefs[i]}>
+                    <div class="combo">
                       <input
                         bind:value={ep.model}
                         placeholder="gpt-4o-mini"
@@ -236,6 +237,19 @@
                           }}
                         >▾</button>
                       {/if}
+                      {#if modelOpen[i] && modelOptions[i]?.length}
+                        <ul class="combo-list">
+                          {#each modelOptions[i].slice(0, 100) as m}
+                            <li
+                              class:active={m === ep.model}
+                              on:mousedown|preventDefault={() => pickModel(i, m)}
+                            >{m}</li>
+                          {/each}
+                          {#if modelOptions[i].length > 100}
+                            <li class="overflow-hint">... 还有 {modelOptions[i].length - 100} 个模型,请输入筛选</li>
+                          {/if}
+                        </ul>
+                      {/if}
                     </div>
                     <button class="query" on:click={() => queryModels(i)} disabled={modelLoading[i]}>
                       {modelLoading[i] ? '查询中…' : '查询模型'}
@@ -260,6 +274,26 @@
 
       <section>
         <div class="sec-head">
+          <h2>代理</h2>
+        </div>
+        <div class="sec-body">
+          <label class="toggle-row">
+            <input type="checkbox" bind:checked={config.proxy.enabled} />
+            <span>启用 HTTP 代理</span>
+          </label>
+          {#if config.proxy.enabled}
+            <div class="grid">
+              <label>主机<input bind:value={config.proxy.host} placeholder="127.0.0.1" /></label>
+              <label>端口<input type="number" bind:value={config.proxy.port} /></label>
+            </div>
+          {/if}
+        </div>
+      </section>
+      {/if}
+
+      {#if tab === 'features'}
+      <section>
+        <div class="sec-head">
           <h2>翻译行为</h2>
         </div>
         <div class="sec-body">
@@ -276,41 +310,13 @@
 
       <section>
         <div class="sec-head">
-          <h2>代理</h2>
-        </div>
-        <div class="sec-body">
-          <label class="toggle-row">
-            <input type="checkbox" bind:checked={config.proxy.enabled} />
-            <span>启用 HTTP 代理</span>
-          </label>
-          {#if config.proxy.enabled}
-            <div class="grid">
-              <label>主机<input bind:value={config.proxy.host} placeholder="127.0.0.1" /></label>
-              <label>端口<input type="number" bind:value={config.proxy.port} /></label>
-            </div>
-          {/if}
-        </div>
-      </section>
-
-      <section>
-        <div class="sec-head">
           <h2>划词功能</h2>
-          <span class="sec-desc">弹窗里的功能按钮，可拖动排序，用 <code>{'{text}'}</code> 代表选中文本</span>
+          <span class="sec-desc">弹窗里的功能按钮，用 <code>{'{text}'}</code> 代表选中文本</span>
         </div>
         <div class="sec-body">
-          {#each config.actions as act, i (act)}
-            <div
-              class="action-item"
-              class:disabled={!act.enabled}
-              class:dragging={dragIndex === i}
-              draggable="true"
-              on:dragstart={() => (dragIndex = i)}
-              on:dragover|preventDefault
-              on:drop|preventDefault={() => onActionDrop(i)}
-              on:dragend={() => (dragIndex = null)}
-            >
+          {#each config.actions as act, i}
+            <div class="action-item" class:disabled={!act.enabled}>
               <div class="action-head">
-                <span class="drag-handle" title="拖动排序"><Icon name="drag" size={16} /></span>
                 <button
                   class="icon-pick"
                   title="选择图标"
@@ -349,33 +355,24 @@
           <button class="add" on:click={addAction}>+ 添加功能</button>
         </div>
       </section>
+      {/if}
+
+      {#if tab === 'about'}
+      <section>
+        <div class="sec-head">
+          <h2>关于</h2>
+        </div>
+        <div class="sec-body about">
+          <div class="about-logo">划词AI</div>
+          <p class="about-line">版本 {appVersion || '—'}</p>
+          <p class="about-line">作者 DsureD</p>
+          <p class="about-desc">轻量级划词翻译工具</p>
+        </div>
+      </section>
+      {/if}
     </div>
   {/if}
 </div>
-
-<!-- 全局下拉列表(fixed 定位,不受父容器限制) -->
-{#each Object.keys(modelOpen) as idx}
-  {#if modelOpen[+idx] && modelOptions[+idx]?.length && comboRefs[+idx]}
-    <ul
-      class="combo-list-global"
-      style="
-        left: {comboRefs[+idx]?.getBoundingClientRect().left}px;
-        top: {comboRefs[+idx]?.getBoundingClientRect().bottom + 4}px;
-        width: {comboRefs[+idx]?.getBoundingClientRect().width}px;
-      "
-    >
-      {#each modelOptions[+idx].slice(0, 100) as m}
-        <li
-          class:active={m === config?.api.endpoints[+idx]?.model}
-          on:mousedown|preventDefault={() => pickModel(+idx, m)}
-        >{m}</li>
-      {/each}
-      {#if modelOptions[+idx].length > 100}
-        <li class="overflow-hint">... 还有 {modelOptions[+idx].length - 100} 个模型,请输入筛选</li>
-      {/if}
-    </ul>
-  {/if}
-{/each}
 
 <style>
   :global(html, body) {
@@ -447,6 +444,59 @@
 
   .status.error {
     color: #d32f2f;
+  }
+
+  /* ===== Tab 栏 ===== */
+  .tabs {
+    display: flex;
+    gap: 4px;
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 12px 24px 0;
+  }
+
+  .tab {
+    background: transparent;
+    color: #6a707c;
+    font-weight: 600;
+    padding: 8px 18px;
+    border-radius: 9px 9px 0 0;
+  }
+
+  .tab:hover {
+    color: #2b2f38;
+    background: rgba(0, 0, 0, 0.03);
+  }
+
+  .tab.active {
+    color: #4f6bed;
+    background: #fff;
+    box-shadow: 0 -1px 4px rgba(0, 0, 0, 0.04);
+  }
+
+  /* ===== 关于页 ===== */
+  .sec-body.about {
+    text-align: center;
+    padding: 32px 20px;
+  }
+
+  .about-logo {
+    font-size: 22px;
+    font-weight: 800;
+    color: #4f6bed;
+    margin-bottom: 14px;
+  }
+
+  .about-line {
+    font-size: 14px;
+    color: #2b2f38;
+    margin: 6px 0;
+  }
+
+  .about-desc {
+    font-size: 12px;
+    color: #9aa0ac;
+    margin-top: 16px;
   }
 
   .settings {
@@ -623,8 +673,11 @@
     color: #4f6bed;
   }
 
-  .combo-list-global {
-    position: fixed;
+  .combo-list {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    width: 100%;
     margin: 0;
     padding: 4px;
     list-style: none;
@@ -634,10 +687,11 @@
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
     max-height: 220px;
     overflow-y: auto;
-    z-index: 9999;
+    z-index: 50;
+    box-sizing: border-box;
   }
 
-  .combo-list-global li {
+  .combo-list li {
     padding: 7px 10px;
     font-size: 13px;
     color: #2b2f38;
@@ -648,11 +702,11 @@
     text-overflow: ellipsis;
   }
 
-  .combo-list-global li:hover {
+  .combo-list li:hover {
     background: #f0f2f8;
   }
 
-  .combo-list-global li.active {
+  .combo-list li.active {
     background: #eef1fd;
     color: #4f6bed;
     font-weight: 600;
@@ -822,27 +876,11 @@
     opacity: 0.6;
   }
 
-  .action-item.dragging {
-    opacity: 0.4;
-    border-color: #4f6bed;
-  }
-
   .action-head {
     display: flex;
     align-items: center;
     gap: 10px;
     margin-bottom: 10px;
-  }
-
-  .drag-handle {
-    display: flex;
-    align-items: center;
-    color: #b6bcc8;
-    cursor: grab;
-  }
-
-  .drag-handle:active {
-    cursor: grabbing;
   }
 
   .icon-pick {
