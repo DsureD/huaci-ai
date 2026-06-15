@@ -16,6 +16,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Manager, WebviewUrl, WebviewWindowBuilder,
 };
+use tauri_plugin_global_shortcut::ShortcutState;
 
 fn main() {
     // 加载配置
@@ -27,6 +28,16 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, shortcut, event| {
+                    // 低级钩子会同时上报按下/抬起，只在按下时触发一次
+                    if event.state() == ShortcutState::Pressed {
+                        commands::handle_global_shortcut(app, shortcut);
+                    }
+                })
+                .build(),
+        )
         .manage(AppState {
             config: Mutex::new(app_config),
         })
@@ -101,6 +112,9 @@ fn main() {
             if let Err(e) = mouse_hook::install_mouse_hook(app.handle().clone()) {
                 eprintln!("安装鼠标钩子失败: {}", e);
             }
+
+            // 按配置注册全局快捷键
+            commands::apply_hotkeys(app.handle());
 
             println!("✓ 划词AI 已启动");
             Ok(())

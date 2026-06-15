@@ -69,6 +69,8 @@ pub struct ActionItem {
     pub prompt: String, // 提示词模板，用 {text} 占位
     pub icon: String,   // 图标名，对应前端 icons 集合的 key
     pub enabled: bool,  // 是否在弹窗显示
+    #[serde(default)]
+    pub auto: bool, // 划词后是否自动执行该功能（取代旧的全局 auto_translate）
 }
 
 // prompts 字段缺失时的兜底值（也是旧配置迁移的来源）
@@ -87,12 +89,14 @@ fn default_actions() -> Vec<ActionItem> {
             prompt: "你是专业的翻译助手。将以下文本翻译成中文，只返回翻译结果，不要解释：\n\n{text}".to_string(),
             icon: "translate".to_string(),
             enabled: true,
+            auto: true,
         },
         ActionItem {
             name: "解释".to_string(),
             prompt: "请用简洁的语言解释以下内容的含义：\n\n{text}".to_string(),
             icon: "explain".to_string(),
             enabled: true,
+            auto: false,
         },
     ]
 }
@@ -167,6 +171,7 @@ pub fn load_config() -> anyhow::Result<Config> {
         let content = fs::read_to_string(&config_path)?;
         let mut config: Config = serde_json::from_str(&content)?;
         // 旧配置没有 actions：用 prompts 迁移成两个功能项，保留用户曾经自定义的提示词
+        // 自动执行沿用旧的全局 auto_translate（仅给“翻译”项）
         if config.actions.is_empty() {
             config.actions = vec![
                 ActionItem {
@@ -174,12 +179,14 @@ pub fn load_config() -> anyhow::Result<Config> {
                     prompt: config.prompts.translate.clone(),
                     icon: "translate".to_string(),
                     enabled: true,
+                    auto: config.app.auto_translate,
                 },
                 ActionItem {
                     name: "解释".to_string(),
                     prompt: config.prompts.explain.clone(),
                     icon: "explain".to_string(),
                     enabled: true,
+                    auto: false,
                 },
             ];
         }

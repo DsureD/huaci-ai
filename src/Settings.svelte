@@ -19,6 +19,7 @@
     prompt: string;
     icon: string;
     enabled: boolean;
+    auto: boolean;
   }
 
   interface Config {
@@ -77,7 +78,7 @@
     if (!config) return;
     config.actions = [
       ...config.actions,
-      { name: '新功能', prompt: '请处理以下内容：\n\n{text}', icon: 'star', enabled: true },
+      { name: '新功能', prompt: '请处理以下内容：\n\n{text}', icon: 'star', enabled: true, auto: false },
     ];
   }
 
@@ -144,6 +145,18 @@
     modelOpen = modelOpen;
   }
 
+  // 点击组合框/图标选择器之外时，关闭对应的下拉
+  function onWindowMouseDown(e: MouseEvent) {
+    const t = e.target as HTMLElement | null;
+    if (!t) return;
+    if (!t.closest('.combo')) {
+      modelOpen = {};
+    }
+    if (!t.closest('.icon-pick') && !t.closest('.icon-grid')) {
+      iconPickerOpen = {};
+    }
+  }
+
   async function save() {
     if (!config) return;
     saving = true;
@@ -159,6 +172,8 @@
     }
   }
 </script>
+
+<svelte:window on:mousedown={onWindowMouseDown} />
 
 <div class="page">
   {#if !config}
@@ -193,7 +208,7 @@
 
         <div class="sec-body">
           {#each config.api.endpoints as ep, i}
-            <div class="endpoint" class:disabled={!ep.enabled}>
+            <div class="endpoint" class:disabled={!ep.enabled} class:combo-open={modelOpen[i]}>
               <div class="endpoint-head">
                 <label class="switch">
                   <input type="checkbox" bind:checked={ep.enabled} />
@@ -301,17 +316,30 @@
             <span class="field-label">最小触发字符数</span>
             <input type="number" bind:value={config.app.min_text_length} min="1" />
           </div>
-          <label class="toggle-row">
-            <input type="checkbox" bind:checked={config.app.auto_translate} />
-            <span>选中后自动翻译</span>
-          </label>
+        </div>
+      </section>
+
+      <section>
+        <div class="sec-head">
+          <h2>快捷键</h2>
+          <span class="sec-desc">全局生效，格式如 <code>Ctrl+Shift+H</code></span>
+        </div>
+        <div class="sec-body">
+          <div class="field-row">
+            <span class="field-label">开关划词监听</span>
+            <input class="hotkey-input" bind:value={config.hotkeys.toggle_capture} placeholder="Ctrl+Shift+H" />
+          </div>
+          <div class="field-row">
+            <span class="field-label">手动翻译（在光标处弹出）</span>
+            <input class="hotkey-input" bind:value={config.hotkeys.manual_translate} placeholder="Ctrl+Q" />
+          </div>
         </div>
       </section>
 
       <section>
         <div class="sec-head">
           <h2>划词功能</h2>
-          <span class="sec-desc">弹窗里的功能按钮，用 <code>{'{text}'}</code> 代表选中文本</span>
+          <span class="sec-desc">弹窗里的功能按钮，「自动」表示划词后直接执行，用 <code>{'{text}'}</code> 代表选中文本</span>
         </div>
         <div class="sec-body">
           {#each config.actions as act, i}
@@ -328,6 +356,10 @@
                   <Icon name={act.icon} size={18} />
                 </button>
                 <input class="action-name" bind:value={act.name} placeholder="功能名称" />
+                <label class="switch" title="划词选中后自动执行此功能">
+                  <input type="checkbox" bind:checked={act.auto} />
+                  <span>自动</span>
+                </label>
                 <label class="switch">
                   <input type="checkbox" bind:checked={act.enabled} />
                   <span>{act.enabled ? '显示' : '隐藏'}</span>
@@ -570,6 +602,12 @@
     opacity: 0.6;
   }
 
+  /* 该卡片的模型下拉展开时，整卡提到上层，避免被后面的卡片盖住 */
+  .endpoint.combo-open {
+    position: relative;
+    z-index: 100;
+  }
+
   .endpoint-head {
     display: flex;
     align-items: center;
@@ -792,6 +830,12 @@
   .field-row input[type='number'] {
     width: 120px;
     flex: none;
+  }
+
+  .hotkey-input {
+    width: 180px;
+    flex: none;
+    text-align: center;
   }
 
   .toggle-row {

@@ -1,8 +1,10 @@
 use crate::{api_manager, clipboard, config, mouse_hook, translator};
 use serde::Serialize;
+use std::str::FromStr;
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, State, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 #[cfg(target_os = "windows")]
 use windows::Win32::Foundation::HWND;
 #[cfg(target_os = "windows")]
@@ -86,7 +88,56 @@ pub fn save_config(
     *state.config.lock().unwrap() = new_config;
     // 通知常驻划词弹窗重新加载功能列表
     let _ = app.emit("config-changed", ());
+    // 快捷键可能被改动，重新注册
+    apply_hotkeys(&app);
     Ok(())
+}
+
+// 按当前配置（重新）注册全局快捷键：先清空再逐个注册，解析失败/冲突的忽略
+pub fn apply_hotkeys(app: &AppHandle) {
+    let gs = app.global_shortcut();
+    let _ = gs.unregister_all();
+
+    let hotkeys = {
+        let state = app.state::<AppState>();
+        let cfg = state.config.lock().unwrap();
+        cfg.hotkeys.clone()
+    };
+
+    for spec in [&hotkeys.toggle_capture, &hotkeys.manual_translate] {
+        if spec.trim().is_empty() {
+            continue;
+        }
+        if let Ok(sc) = Shortcut::from_str(spec) {
+            let _ = gs.register(sc);
+        }
+    }
+}
+
+// 全局快捷键被按下时的分发：匹配配置里的两个快捷键
+pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut) {
+    let hotkeys = {
+        let state = app.state::<AppState>();
+        let cfg = state.config.lock().unwrap();
+        cfg.hotkeys.clone()
+    };
+
+    // 开关划词捕获
+    if let Ok(sc) = Shortcut::from_str(&hotkeys.toggle_capture) {
+        if shortcut == &sc {
+            let current = mouse_hook::is_capture_enabled();
+            mouse_hook::set_capture_enabled(!current);
+            // 注：托盘菜单文字不在此处同步，功能本身不受影响
+            return;
+        }
+    }
+
+    // 手动翻译：在光标处按划词流程弹出（不受捕获开关限制）
+    if let Ok(sc) = Shortcut::from_str(&hotkeys.manual_translate) {
+        if shortcut == &sc {
+            let _ = app.emit("text-selected", mouse_hook::cursor_pos());
+        }
+    }
 }
 
 // 加载配置

@@ -23,7 +23,7 @@
     document.documentElement.classList.add('popup-window');
   }
 
-  interface ActionItem { name: string; prompt: string; icon: string; enabled: boolean }
+  interface ActionItem { name: string; prompt: string; icon: string; enabled: boolean; auto: boolean }
 
   let selectedText = '';
   let mode: 'toolbar' | 'result' = 'toolbar'; // toolbar=工具条, result=翻译结果
@@ -79,7 +79,7 @@
 
     await listen<[number, number]>('text-selected', async (event) => {
       try {
-        const [text, autoTranslate, oldClipboard] = await invoke<[string, boolean, string | null]>('get_selected_text');
+        const [text, , oldClipboard] = await invoke<[string, boolean, string | null]>('get_selected_text');
         if (!text || text.trim().length === 0) return;
 
         selectedText = text;
@@ -101,9 +101,10 @@
           }, 300);
         }
 
-        // 如果开启了自动翻译，直接执行
-        if (autoTranslate && enabledActions.length > 0) {
-          await doTranslate(enabledActions[0]);
+        // 若有功能项被标记为「划词后自动执行」，直接运行第一个
+        const autoAction = enabledActions.find((a) => a.auto);
+        if (autoAction) {
+          await doTranslate(autoAction);
         }
       } catch (error) {
         console.error('划词处理失败:', error);

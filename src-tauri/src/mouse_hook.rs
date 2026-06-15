@@ -214,3 +214,12 @@ pub fn set_capture_enabled(enabled: bool) {
 pub fn is_capture_enabled() -> bool {
     CAPTURE_ENABLED.load(Ordering::Relaxed)
 }
+
+// 当前鼠标光标的屏幕坐标（手动翻译快捷键用它定位弹窗）
+pub fn cursor_pos() -> (i32, i32) {
+    unsafe {
+        let mut p = POINT::default();
+        let _ = GetCursorPos(&mut p);
+        (p.x, p.y)
+    }
+}
