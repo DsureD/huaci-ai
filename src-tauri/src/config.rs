@@ -9,7 +9,10 @@ pub struct Config {
     pub api: ApiConfig,
     pub proxy: ProxyConfig,
     pub ui: UiConfig,
+    #[serde(default = "default_prompts")]
     pub prompts: PromptConfig,
+    #[serde(default)]
+    pub actions: Vec<ActionItem>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,6 +62,41 @@ pub struct PromptConfig {
     pub explain: String,
 }
 
+// 划词弹窗的可自定义功能项（替代写死的 翻译/解释）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActionItem {
+    pub name: String,   // 显示名称
+    pub prompt: String, // 提示词模板，用 {text} 占位
+    pub icon: String,   // 图标名，对应前端 icons 集合的 key
+    pub enabled: bool,  // 是否在弹窗显示
+}
+
+// prompts 字段缺失时的兜底值（也是旧配置迁移的来源）
+fn default_prompts() -> PromptConfig {
+    PromptConfig {
+        translate: "你是专业的翻译助手。将以下文本翻译成中文，只返回翻译结果，不要解释：\n\n{text}".to_string(),
+        explain: "请用简洁的语言解释以下内容的含义：\n\n{text}".to_string(),
+    }
+}
+
+// 全新安装时的默认功能项
+fn default_actions() -> Vec<ActionItem> {
+    vec![
+        ActionItem {
+            name: "翻译".to_string(),
+            prompt: "你是专业的翻译助手。将以下文本翻译成中文，只返回翻译结果，不要解释：\n\n{text}".to_string(),
+            icon: "translate".to_string(),
+            enabled: true,
+        },
+        ActionItem {
+            name: "解释".to_string(),
+            prompt: "请用简洁的语言解释以下内容的含义：\n\n{text}".to_string(),
+            icon: "explain".to_string(),
+            enabled: true,
+        },
+    ]
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -92,10 +130,8 @@ impl Default for Config {
                 opacity: 0.95,
                 font_size: 14,
             },
-            prompts: PromptConfig {
-                translate: "你是专业的翻译助手。将以下文本翻译成中文，只返回翻译结果，不要解释：\n\n{text}".to_string(),
-                explain: "请用简洁的语言解释以下内容的含义：\n\n{text}".to_string(),
-            },
+            prompts: default_prompts(),
+            actions: default_actions(),
         }
     }
 }
@@ -129,7 +165,24 @@ pub fn load_config() -> anyhow::Result<Config> {
 
     if config_path.exists() {
         let content = fs::read_to_string(&config_path)?;
-        let config: Config = serde_json::from_str(&content)?;
+        let mut config: Config = serde_json::from_str(&content)?;
+        // 旧配置没有 actions：用 prompts 迁移成两个功能项，保留用户曾经自定义的提示词
+        if config.actions.is_empty() {
+            config.actions = vec![
+                ActionItem {
+                    name: "翻译".to_string(),
+                    prompt: config.prompts.translate.clone(),
+                    icon: "translate".to_string(),
+                    enabled: true,
+                },
+                ActionItem {
+                    name: "解释".to_string(),
+                    prompt: config.prompts.explain.clone(),
+                    icon: "explain".to_string(),
+                    enabled: true,
+                },
+            ];
+        }
         Ok(config)
     } else {
         let default_config = Config::default();

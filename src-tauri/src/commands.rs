@@ -2,7 +2,7 @@ use crate::{api_manager, clipboard, config, mouse_hook, translator};
 use serde::Serialize;
 use std::sync::Mutex;
 use std::time::Duration;
-use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, State, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, State, WebviewUrl, WebviewWindowBuilder};
 #[cfg(target_os = "windows")]
 use windows::Win32::Foundation::HWND;
 #[cfg(target_os = "windows")]
@@ -41,11 +41,11 @@ pub fn restore_clipboard(app: AppHandle, text: Option<String>) -> Result<(), Str
     Ok(())
 }
 
-// 翻译文本
+// 翻译文本（prompt 为功能项的提示词模板，用 {text} 占位）
 #[tauri::command]
 pub async fn translate_text(
     text: String,
-    mode: String,
+    prompt: String,
     state: State<'_, AppState>,
 ) -> Result<TranslateResult, String> {
     let config = state.config.lock().unwrap().clone();
@@ -55,20 +55,13 @@ pub async fn translate_text(
         return Err("文本太短".to_string());
     }
 
-    // 选择提示词模板
-    let prompt_template = match mode.as_str() {
-        "translate" => &config.prompts.translate,
-        "explain" => &config.prompts.explain,
-        _ => &config.prompts.translate,
-    };
-
-    // 调用 API（带故障转移）
+    // 调用 API（带故障转移），prompt 即所选功能项的提示词模板
     let timeout = Duration::from_secs(config.api.timeout_seconds);
 
     let (result_text, endpoint) = api_manager::translate_with_failover(
         &text,
         config.api.endpoints.clone(),
-        prompt_template,
+        &prompt,
         &config.proxy,
         timeout,
     )
@@ -84,9 +77,15 @@ pub async fn translate_text(
 
 // 保存配置
 #[tauri::command]
-pub fn save_config(new_config: config::Config, state: State<'_, AppState>) -> Result<(), String> {
+pub fn save_config(
+    app: AppHandle,
+    new_config: config::Config,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     config::save_config(&new_config).map_err(|e| e.to_string())?;
     *state.config.lock().unwrap() = new_config;
+    // 通知常驻划词弹窗重新加载功能列表
+    let _ = app.emit("config-changed", ());
     Ok(())
 }
 

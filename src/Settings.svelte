@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
+  import Icon from './Icon.svelte';
+  import { ICONS } from './icons';
 
   interface ApiEndpoint {
     name: string;
@@ -11,6 +13,13 @@
     priority: number;
   }
 
+  interface ActionItem {
+    name: string;
+    prompt: string;
+    icon: string;
+    enabled: boolean;
+  }
+
   interface Config {
     app: { auto_translate: boolean; min_text_length: number };
     hotkeys: { toggle_capture: string; manual_translate: string };
@@ -18,6 +27,7 @@
     proxy: { enabled: boolean; host: string; port: number };
     ui: { opacity: number; font_size: number };
     prompts: { translate: string; explain: string };
+    actions: ActionItem[];
   }
 
   let config: Config | null = null;
@@ -50,6 +60,43 @@
   function removeEndpoint(index: number) {
     if (!config) return;
     config.api.endpoints = config.api.endpoints.filter((_, i) => i !== index);
+  }
+
+  // ===== 划词功能项 =====
+  let iconPickerOpen: Record<number, boolean> = {};
+  let dragIndex: number | null = null;
+
+  function addAction() {
+    if (!config) return;
+    config.actions = [
+      ...config.actions,
+      { name: '新功能', prompt: '请处理以下内容：\n\n{text}', icon: 'star', enabled: true },
+    ];
+  }
+
+  function removeAction(index: number) {
+    if (!config) return;
+    config.actions = config.actions.filter((_, i) => i !== index);
+  }
+
+  function pickIcon(i: number, key: string) {
+    if (!config) return;
+    config.actions[i].icon = key;
+    config.actions = config.actions;
+    iconPickerOpen[i] = false;
+    iconPickerOpen = iconPickerOpen;
+  }
+
+  function onActionDrop(target: number) {
+    if (!config || dragIndex === null || dragIndex === target) {
+      dragIndex = null;
+      return;
+    }
+    const arr = [...config.actions];
+    const [moved] = arr.splice(dragIndex, 1);
+    arr.splice(target, 0, moved);
+    config.actions = arr;
+    dragIndex = null;
   }
 
   // 模型查询状态（按接口索引）
@@ -247,18 +294,59 @@
 
       <section>
         <div class="sec-head">
-          <h2>提示词</h2>
-          <span class="sec-desc">用 <code>{'{text}'}</code> 代表选中文本</span>
+          <h2>划词功能</h2>
+          <span class="sec-desc">弹窗里的功能按钮，可拖动排序，用 <code>{'{text}'}</code> 代表选中文本</span>
         </div>
         <div class="sec-body">
-          <label class="block">
-            <span class="field-label">翻译提示词</span>
-            <textarea rows="3" bind:value={config.prompts.translate}></textarea>
-          </label>
-          <label class="block">
-            <span class="field-label">解释提示词</span>
-            <textarea rows="3" bind:value={config.prompts.explain}></textarea>
-          </label>
+          {#each config.actions as act, i (act)}
+            <div
+              class="action-item"
+              class:disabled={!act.enabled}
+              class:dragging={dragIndex === i}
+              draggable="true"
+              on:dragstart={() => (dragIndex = i)}
+              on:dragover|preventDefault
+              on:drop|preventDefault={() => onActionDrop(i)}
+              on:dragend={() => (dragIndex = null)}
+            >
+              <div class="action-head">
+                <span class="drag-handle" title="拖动排序"><Icon name="drag" size={16} /></span>
+                <button
+                  class="icon-pick"
+                  title="选择图标"
+                  on:click={() => {
+                    iconPickerOpen[i] = !iconPickerOpen[i];
+                    iconPickerOpen = iconPickerOpen;
+                  }}
+                >
+                  <Icon name={act.icon} size={18} />
+                </button>
+                <input class="action-name" bind:value={act.name} placeholder="功能名称" />
+                <label class="switch">
+                  <input type="checkbox" bind:checked={act.enabled} />
+                  <span>{act.enabled ? '显示' : '隐藏'}</span>
+                </label>
+                <button class="remove" on:click={() => removeAction(i)}>删除</button>
+              </div>
+              {#if iconPickerOpen[i]}
+                <div class="icon-grid">
+                  {#each ICONS as ic}
+                    <button
+                      class="icon-cell"
+                      class:active={ic.key === act.icon}
+                      title={ic.label}
+                      on:click={() => pickIcon(i, ic.key)}
+                    >
+                      <Icon name={ic.key} size={18} />
+                    </button>
+                  {/each}
+                </div>
+              {/if}
+              <textarea class="action-prompt" rows="3" bind:value={act.prompt} placeholder="提示词模板，用 {'{text}'} 代表选中文本"></textarea>
+            </div>
+          {/each}
+
+          <button class="add" on:click={addAction}>+ 添加功能</button>
         </div>
       </section>
     </div>
@@ -718,6 +806,103 @@
 
   .add:hover {
     background: #e3e8fc;
+  }
+
+  /* ===== 划词功能项 ===== */
+  .action-item {
+    border: 1px solid #e8eaef;
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 14px;
+    background: #fdfdfe;
+    transition: border-color 0.15s, opacity 0.15s, box-shadow 0.15s;
+  }
+
+  .action-item.disabled {
+    opacity: 0.6;
+  }
+
+  .action-item.dragging {
+    opacity: 0.4;
+    border-color: #4f6bed;
+  }
+
+  .action-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+
+  .drag-handle {
+    display: flex;
+    align-items: center;
+    color: #b6bcc8;
+    cursor: grab;
+  }
+
+  .drag-handle:active {
+    cursor: grabbing;
+  }
+
+  .icon-pick {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    flex: none;
+    background: #eef1fd;
+    color: #4f6bed;
+    border-radius: 9px;
+  }
+
+  .icon-pick:hover {
+    background: #e3e8fc;
+  }
+
+  .action-name {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .icon-grid {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 6px;
+    padding: 10px;
+    margin-bottom: 10px;
+    background: #f6f7fb;
+    border-radius: 10px;
+  }
+
+  .icon-cell {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    aspect-ratio: 1;
+    padding: 0;
+    background: #fff;
+    color: #6a707c;
+    border: 1px solid #e8eaef;
+    border-radius: 8px;
+  }
+
+  .icon-cell:hover {
+    color: #4f6bed;
+    border-color: #c3ccf6;
+  }
+
+  .icon-cell.active {
+    background: #eef1fd;
+    color: #4f6bed;
+    border-color: #4f6bed;
+  }
+
+  .action-prompt {
+    resize: vertical;
+    line-height: 1.5;
   }
 
   .remove {

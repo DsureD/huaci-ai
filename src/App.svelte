@@ -7,6 +7,7 @@
   import { open } from '@tauri-apps/plugin-shell';
   import { marked } from 'marked';
   import Settings from './Settings.svelte';
+  import Icon from './Icon.svelte';
 
   // 只配置一次,避免重复调用累积内存
   if (typeof window !== 'undefined' && !(window as any).__markedConfigured) {
@@ -22,13 +23,17 @@
     document.documentElement.classList.add('popup-window');
   }
 
+  interface ActionItem { name: string; prompt: string; icon: string; enabled: boolean }
+
   let selectedText = '';
   let mode: 'toolbar' | 'result' = 'toolbar'; // toolbar=工具条, result=翻译结果
   let resultText = '';
   let resultEndpoint = '';
   let resultModel = '';
   let isLoading = false;
-  let currentAction: 'translate' | 'explain' = 'translate';
+  let actions: ActionItem[] = []; // 划词功能项（来自配置）
+  let currentAction: ActionItem | null = null;
+  $: enabledActions = actions.filter((a) => a.enabled);
   let rootEl: HTMLElement;
   let pinned = false; // 钉住：不随失焦自动关闭
   let copied = false;
@@ -66,6 +71,12 @@
 
     const currentWin = getCurrentWindow();
 
+    // 加载划词功能项，并在设置保存后实时重载
+    await loadActions();
+    await listen('config-changed', () => {
+      loadActions();
+    });
+
     await listen<[number, number]>('text-selected', async (event) => {
       try {
         const [text, autoTranslate, oldClipboard] = await invoke<[string, boolean, string | null]>('get_selected_text');
@@ -91,8 +102,8 @@
         }
 
         // 如果开启了自动翻译，直接执行
-        if (autoTranslate) {
-          await doTranslate('translate');
+        if (autoTranslate && enabledActions.length > 0) {
+          await doTranslate(enabledActions[0]);
         }
       } catch (error) {
         console.error('划词处理失败:', error);
@@ -124,7 +135,16 @@
     });
   });
 
-  async function doTranslate(action: 'translate' | 'explain') {
+  async function loadActions() {
+    try {
+      const cfg = await invoke<{ actions?: ActionItem[] }>('load_config');
+      actions = cfg.actions ?? [];
+    } catch (e) {
+      console.error('加载功能项失败:', e);
+    }
+  }
+
+  async function doTranslate(action: ActionItem) {
     currentAction = action;
     mode = 'result';
     isLoading = true;
@@ -136,7 +156,7 @@
     try {
       const result = await invoke<{ text: string; endpoint_name: string; model: string }>('translate_text', {
         text: selectedText,
-        mode: action,
+        prompt: action.prompt,
       });
 
       // 防止超大响应撑爆渲染(前端保护,后端也有 2MB 限制)
@@ -207,28 +227,21 @@
   <div class="popup" bind:this={rootEl}>
     {#if mode === 'toolbar'}
       <div class="toolbar">
-        <button class="action-btn" on:click={() => doTranslate('translate')}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M5 8h14M5 12h14M5 16h10" />
-          </svg>
-          翻译
-        </button>
-        <div class="divider"></div>
-        <button class="action-btn" on:click={() => doTranslate('explain')}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10" />
-            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01" />
-          </svg>
-          解释
-        </button>
+        {#each enabledActions as action, i}
+          {#if i > 0}<div class="divider"></div>{/if}
+          <button class="action-btn" on:click={() => doTranslate(action)}>
+            <Icon name={action.icon} size={16} />
+            {action.name}
+          </button>
+        {/each}
         <button class="close-btn" on:click={closeWindow} aria-label="关闭">×</button>
       </div>
     {:else}
       <div class="result-card">
         <div class="card-head" on:mousedown={startDrag} role="toolbar" tabindex="-1">
           <div class="head-left">
-            <span class="badge" class:explain={currentAction === 'explain'}>
-              {currentAction === 'translate' ? '翻译' : '解释'}
+            <span class="badge">
+              {currentAction?.name ?? ''}
             </span>
             {#if resultEndpoint}
               <span class="model-info">{resultEndpoint} · {resultModel}</span>
@@ -398,11 +411,6 @@
     border-radius: 6px;
     letter-spacing: 0.5px;
     flex-shrink: 0;
-  }
-
-  .badge.explain {
-    color: #d97706;
-    background: rgba(217, 119, 6, 0.12);
   }
 
   .model-info {
