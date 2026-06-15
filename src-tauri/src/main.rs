@@ -7,6 +7,7 @@ mod commands;
 mod config;
 mod mouse_hook;
 mod translator;
+mod uia;
 
 use commands::AppState;
 use std::sync::Mutex;

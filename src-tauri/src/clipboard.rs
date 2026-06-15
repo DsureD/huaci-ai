@@ -4,6 +4,13 @@ use windows::Win32::UI::Input::KeyboardAndMouse::*;
 
 // 获取选中文本,返回 (选中的文本, 需要恢复的旧剪贴板内容)
 pub fn get_selected_text(app: &AppHandle) -> anyhow::Result<(String, Option<String>)> {
+    // 首选 UI Automation：直接读取焦点控件中的选中文本，不触碰剪贴板、不模拟按键，
+    // 因此既不污染剪贴板，也不会在终端里触发中断。成功时无需恢复，旧剪贴板返回 None。
+    if let Some(text) = crate::uia::get_selected_text_uia() {
+        return Ok((text, None));
+    }
+
+    // 回退：少数不支持 UIA TextPattern 的控件，才退回到模拟 Ctrl+C 取词
     // 保存当前剪贴板内容
     let old_clipboard = app.clipboard().read_text().ok();
 

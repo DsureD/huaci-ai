@@ -99,11 +99,6 @@
       }
     });
 
-    // 弹窗不抢焦点，无法依赖失焦事件：由后端的全局点击监听，在“点到窗口之外”时通知关闭
-    await listen('click-outside', () => {
-      if (!pinned && !dragging) closeWindow();
-    });
-
     // 点击窗口外部（弹窗失去焦点）自动关闭；钉住或拖动中时保持
     await currentWin.onFocusChanged(({ payload: focused }) => {
       if (focused) {

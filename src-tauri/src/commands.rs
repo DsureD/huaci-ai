@@ -3,13 +3,6 @@ use serde::Serialize;
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, State, WebviewUrl, WebviewWindowBuilder};
-#[cfg(target_os = "windows")]
-use windows::Win32::Foundation::HWND;
-#[cfg(target_os = "windows")]
-use windows::Win32::UI::WindowsAndMessaging::{
-    SetWindowPos, ShowWindow, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-    SW_SHOWNOACTIVATE,
-};
 
 // 全局配置状态
 pub struct AppState {
@@ -115,39 +108,11 @@ pub fn show_popup(app: AppHandle, x: i32, y: i32) -> Result<(), String> {
     if let Some(win) = app.get_webview_window("main") {
         // 让窗口出现在鼠标右下方，避免遮住选中文字
         let _ = win.set_position(PhysicalPosition::new(x + 12, y + 12));
-
-        // 关键：以“不激活”方式显示，不抢占原应用焦点。
-        // 否则弹窗一弹出就夺走焦点，用户在原程序里按 Ctrl+C 会发到弹窗而非原程序，
-        // 导致“划词后无法复制”。不抢焦点后，关闭逻辑改由全局点击驱动（见 mouse_hook）。
-        #[cfg(target_os = "windows")]
-        {
-            match win.hwnd() {
-                Ok(h) => unsafe {
-                    let hwnd = HWND(h.0 as _);
-                    let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
-                    // 置顶但不激活
-                    let _ = SetWindowPos(
-                        hwnd,
-                        HWND_TOPMOST,
-                        0,
-                        0,
-                        0,
-                        0,
-                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-                    );
-                },
-                Err(_) => {
-                    // 拿不到原生句柄时退化为普通显示
-                    win.show().map_err(|e| e.to_string())?;
-                    let _ = win.set_always_on_top(true);
-                }
-            }
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            win.show().map_err(|e| e.to_string())?;
-            let _ = win.set_always_on_top(true);
-        }
+        win.show().map_err(|e| e.to_string())?;
+        let _ = win.set_always_on_top(true);
+        // 取词已在显示前完成（UIA 优先，必要时回退 Ctrl+C），不再依赖原程序保持焦点，
+        // 因此这里放心抢占焦点，使 ESC、失焦自动关闭、关闭按钮等交互都正常工作。
+        let _ = win.set_focus();
     }
     Ok(())
 }
