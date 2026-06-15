@@ -31,6 +31,7 @@
   let resultEndpoint = '';
   let resultModel = '';
   let isLoading = false;
+  let loadingStatus = ''; // 加载中的进度提示（故障转移时显示正在请求哪个接口）
   let actions: ActionItem[] = []; // 划词功能项（来自配置）
   let currentAction: ActionItem | null = null;
   $: enabledActions = actions.filter((a) => a.enabled);
@@ -75,6 +76,15 @@
     await loadActions();
     await listen('config-changed', () => {
       loadActions();
+    });
+
+    // 故障转移进度：显示正在请求第几个接口
+    await listen<{ index: number; total: number; endpoint: string }>('translate-progress', (event) => {
+      if (!isLoading) return;
+      const p = event.payload;
+      loadingStatus = p.total > 1
+        ? `正在请求 ${p.endpoint}（${p.index}/${p.total}）…`
+        : `正在请求 ${p.endpoint}…`;
     });
 
     await listen<[number, number]>('text-selected', async (event) => {
@@ -149,6 +159,7 @@
     currentAction = action;
     mode = 'result';
     isLoading = true;
+    loadingStatus = '';
     resultText = '';
     resultEndpoint = '';
     resultModel = '';
@@ -284,6 +295,9 @@
           <div class="loading-dots">
             <span></span><span></span><span></span>
           </div>
+          {#if loadingStatus}
+            <div class="loading-status">{loadingStatus}</div>
+          {/if}
         {:else}
           <div class="result-text" on:click={onResultClick}>{@html renderedHtml}</div>
         {/if}
@@ -575,6 +589,13 @@
     justify-content: center;
     align-items: center;
     padding: 12px 0;
+  }
+
+  .loading-status {
+    text-align: center;
+    font-size: 12px;
+    color: #8a909c;
+    padding: 0 12px 10px;
   }
 
   .loading-dots span {

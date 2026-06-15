@@ -11,12 +11,27 @@ mod uia;
 
 use commands::AppState;
 use std::sync::Mutex;
+use std::sync::OnceLock;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Manager, WebviewUrl, WebviewWindowBuilder,
 };
 use tauri_plugin_global_shortcut::ShortcutState;
+
+// 托盘里的「启用/禁用划词监听」菜单项，供快捷键切换捕获后同步文字
+pub static TOGGLE_MENU_ITEM: OnceLock<MenuItem<tauri::Wry>> = OnceLock::new();
+
+// 切换捕获状态后同步托盘菜单文字（托盘与快捷键共用这一处逻辑）
+pub fn sync_toggle_text(enabled: bool) {
+    if let Some(item) = TOGGLE_MENU_ITEM.get() {
+        let _ = item.set_text(if enabled {
+            "禁用划词监听"
+        } else {
+            "启用划词监听"
+        });
+    }
+}
 
 fn main() {
     // 加载配置
@@ -60,6 +75,8 @@ fn main() {
 
             // 把可变菜单项交给闭包持有，便于动态更新文字
             let toggle_handle = toggle_item.clone();
+            // 同一菜单项存入全局，供快捷键切换捕获时同步文字
+            let _ = TOGGLE_MENU_ITEM.set(toggle_item.clone());
 
             // 创建托盘图标（复用应用图标，避免出现“透明无图标”的托盘）
             let mut tray_builder = TrayIconBuilder::new()
@@ -132,6 +149,7 @@ fn main() {
             commands::resize_popup,
             commands::list_models,
             commands::open_settings,
+            commands::get_hotkey_status,
         ])
         .run(tauri::generate_context!())
         .expect("运行 Tauri 应用时出错");

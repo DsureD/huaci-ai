@@ -25,6 +25,14 @@ pub struct TranslateResult {
     model: String,
 }
 
+// 故障转移进度：第 index/total 个接口，名为 endpoint
+#[derive(Serialize, Clone)]
+struct TranslateProgress {
+    index: usize,
+    total: usize,
+    endpoint: String,
+}
+
 // 获取选中文本及自动翻译开关状态,返回 (文本, 自动翻译, 旧剪贴板)
 #[tauri::command]
 pub fn get_selected_text(app: AppHandle, state: State<'_, AppState>) -> Result<(String, bool, Option<String>), String> {
@@ -46,6 +54,7 @@ pub fn restore_clipboard(app: AppHandle, text: Option<String>) -> Result<(), Str
 // 翻译文本（prompt 为功能项的提示词模板，用 {text} 占位）
 #[tauri::command]
 pub async fn translate_text(
+    app: AppHandle,
     text: String,
     prompt: String,
     state: State<'_, AppState>,
@@ -66,6 +75,17 @@ pub async fn translate_text(
         &prompt,
         &config.proxy,
         timeout,
+        |index, total, name| {
+            // 每尝试一个接口前推送进度，让弹窗显示「正在请求 …（n/N）」
+            let _ = app.emit(
+                "translate-progress",
+                TranslateProgress {
+                    index,
+                    total,
+                    endpoint: name.to_string(),
+                },
+            );
+        },
     )
     .await
     .map_err(|e| e.to_string())?;
@@ -114,6 +134,33 @@ pub fn apply_hotkeys(app: &AppHandle) {
     }
 }
 
+// 每个快捷键当前是否已成功注册（被其它程序占用/格式错误都会是 false）
+#[derive(Serialize)]
+pub struct HotkeyStatus {
+    toggle: bool,
+    manual: bool,
+}
+
+// 查询两个快捷键是否已注册，供设置页显示「已生效/未生效」
+#[tauri::command]
+pub fn get_hotkey_status(app: AppHandle) -> Result<HotkeyStatus, String> {
+    let gs = app.global_shortcut();
+    let hotkeys = {
+        let state = app.state::<AppState>();
+        let cfg = state.config.lock().unwrap();
+        cfg.hotkeys.clone()
+    };
+    let is_reg = |spec: &str| -> bool {
+        Shortcut::from_str(spec)
+            .map(|sc| gs.is_registered(sc))
+            .unwrap_or(false)
+    };
+    Ok(HotkeyStatus {
+        toggle: is_reg(&hotkeys.toggle_capture),
+        manual: is_reg(&hotkeys.manual_translate),
+    })
+}
+
 // 全局快捷键被按下时的分发：匹配配置里的两个快捷键
 pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut) {
     let hotkeys = {
@@ -125,9 +172,9 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut) {
     // 开关划词捕获
     if let Ok(sc) = Shortcut::from_str(&hotkeys.toggle_capture) {
         if shortcut == &sc {
-            let current = mouse_hook::is_capture_enabled();
-            mouse_hook::set_capture_enabled(!current);
-            // 注：托盘菜单文字不在此处同步，功能本身不受影响
+            let new_state = !mouse_hook::is_capture_enabled();
+            mouse_hook::set_capture_enabled(new_state);
+            crate::sync_toggle_text(new_state); // 同步托盘菜单文字，让切换可见
             return;
         }
     }

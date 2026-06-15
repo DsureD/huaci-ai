@@ -37,6 +37,15 @@
   let saving = false;
   let tab: 'api' | 'features' | 'about' = 'api';
   let appVersion = '';
+  let hotkeyStatus: { toggle: boolean; manual: boolean } = { toggle: false, manual: false };
+
+  async function loadHotkeyStatus() {
+    try {
+      hotkeyStatus = await invoke<{ toggle: boolean; manual: boolean }>('get_hotkey_status');
+    } catch (e) {
+      console.error('查询快捷键状态失败:', e);
+    }
+  }
 
   onMount(async () => {
     try {
@@ -49,6 +58,7 @@
     } catch {
       appVersion = '';
     }
+    await loadHotkeyStatus();
   });
 
   function addEndpoint() {
@@ -122,8 +132,7 @@
       modelOptions = modelOptions;
       if (list.length) {
         modelMsg[i] = `找到 ${list.length} 个模型，点击输入框可下拉选择`;
-        modelOpen[i] = true;
-        modelOpen = modelOpen;
+        modelOpen = { [i]: true }; // 单开：打开本接口列表的同时关闭其它
       } else {
         modelMsg[i] = '接口未返回模型';
       }
@@ -141,18 +150,19 @@
     if (!config) return;
     config.api.endpoints[i].model = m;
     config.api.endpoints = config.api.endpoints;
-    modelOpen[i] = false;
-    modelOpen = modelOpen;
+    modelOpen = {};
   }
 
-  // 点击组合框/图标选择器之外时，关闭对应的下拉
+  // 点击组合框/图标选择器之外时，关闭对应的下拉。
+  // 仅在确有打开项时才改状态，避免每次点击（含数字输入框微调）都触发整页重渲染。
   function onWindowMouseDown(e: MouseEvent) {
     const t = e.target as HTMLElement | null;
     if (!t) return;
-    if (!t.closest('.combo')) {
+    const anyOpen = (o: Record<number, boolean>) => Object.values(o).some(Boolean);
+    if (anyOpen(modelOpen) && !t.closest('.combo')) {
       modelOpen = {};
     }
-    if (!t.closest('.icon-pick') && !t.closest('.icon-grid')) {
+    if (anyOpen(iconPickerOpen) && !t.closest('.icon-pick') && !t.closest('.icon-grid')) {
       iconPickerOpen = {};
     }
   }
@@ -164,6 +174,7 @@
     try {
       await invoke('save_config', { newConfig: config });
       status = '✓ 已保存';
+      await loadHotkeyStatus(); // 保存后已重新注册，刷新快捷键状态
       setTimeout(() => (status = ''), 2000);
     } catch (e) {
       status = '保存失败: ' + e;
@@ -208,13 +219,12 @@
 
         <div class="sec-body">
           {#each config.api.endpoints as ep, i}
-            <div class="endpoint" class:disabled={!ep.enabled} class:combo-open={modelOpen[i]}>
+            <div class="endpoint" class:disabled={!ep.enabled}>
               <div class="endpoint-head">
                 <label class="switch">
                   <input type="checkbox" bind:checked={ep.enabled} />
                   <span>{ep.enabled ? '已启用' : '已禁用'}</span>
                 </label>
-                <span class="ep-name">{ep.name || '未命名接口'}</span>
                 <button class="remove" on:click={() => removeEndpoint(i)}>删除</button>
               </div>
               <div class="grid">
@@ -231,14 +241,12 @@
                         placeholder="gpt-4o-mini"
                         on:focus={() => {
                           if (modelOptions[i]?.length) {
-                            modelOpen[i] = true;
-                            modelOpen = modelOpen;
+                            modelOpen = { [i]: true };
                           }
                         }}
                         on:blur={() => {
                           setTimeout(() => {
-                            modelOpen[i] = false;
-                            modelOpen = modelOpen;
+                            modelOpen = {};
                           }, 150);
                         }}
                       />
@@ -247,8 +255,7 @@
                           class="combo-toggle"
                           aria-label="展开模型列表"
                           on:mousedown|preventDefault={() => {
-                            modelOpen[i] = !modelOpen[i];
-                            modelOpen = modelOpen;
+                            modelOpen = modelOpen[i] ? {} : { [i]: true };
                           }}
                         >▾</button>
                       {/if}
@@ -281,7 +288,7 @@
           <button class="add" on:click={addEndpoint}>+ 添加接口</button>
 
           <div class="field-row">
-            <span class="field-label">请求超时（秒）</span>
+            <span class="field-label">每个接口请求超时（秒）</span>
             <input type="number" bind:value={config.api.timeout_seconds} min="1" />
           </div>
         </div>
@@ -309,29 +316,23 @@
       {#if tab === 'features'}
       <section>
         <div class="sec-head">
-          <h2>翻译行为</h2>
-        </div>
-        <div class="sec-body">
-          <div class="field-row">
-            <span class="field-label">最小触发字符数</span>
-            <input type="number" bind:value={config.app.min_text_length} min="1" />
-          </div>
-        </div>
-      </section>
-
-      <section>
-        <div class="sec-head">
           <h2>快捷键</h2>
-          <span class="sec-desc">全局生效，格式如 <code>Ctrl+Shift+H</code></span>
+          <span class="sec-desc">全局生效，格式如 <code>Ctrl+Shift+H</code>，改后需点「保存」</span>
         </div>
         <div class="sec-body">
           <div class="field-row">
             <span class="field-label">开关划词监听</span>
-            <input class="hotkey-input" bind:value={config.hotkeys.toggle_capture} placeholder="Ctrl+Shift+H" />
+            <div class="hotkey-cell">
+              <input class="hotkey-input" bind:value={config.hotkeys.toggle_capture} placeholder="Ctrl+Shift+H" />
+              <span class="hk-status" class:ok={hotkeyStatus.toggle}>{hotkeyStatus.toggle ? '已生效' : '未生效 · 可能被占用'}</span>
+            </div>
           </div>
           <div class="field-row">
             <span class="field-label">手动翻译（在光标处弹出）</span>
-            <input class="hotkey-input" bind:value={config.hotkeys.manual_translate} placeholder="Ctrl+Q" />
+            <div class="hotkey-cell">
+              <input class="hotkey-input" bind:value={config.hotkeys.manual_translate} placeholder="Ctrl+Q" />
+              <span class="hk-status" class:ok={hotkeyStatus.manual}>{hotkeyStatus.manual ? '已生效' : '未生效 · 可能被占用'}</span>
+            </div>
           </div>
         </div>
       </section>
@@ -342,6 +343,10 @@
           <span class="sec-desc">弹窗里的功能按钮，「自动」表示划词后直接执行，用 <code>{'{text}'}</code> 代表选中文本</span>
         </div>
         <div class="sec-body">
+          <div class="field-row trigger-row">
+            <span class="field-label">划词触发的最小字符数</span>
+            <input type="number" bind:value={config.app.min_text_length} min="1" />
+          </div>
           {#each config.actions as act, i}
             <div class="action-item" class:disabled={!act.enabled}>
               <div class="action-head">
@@ -544,7 +549,6 @@
     background: #fff;
     border-radius: 14px;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 16px rgba(0, 0, 0, 0.04);
-    transform: translateZ(0);
   }
 
   .sec-head {
@@ -594,23 +598,16 @@
     margin-bottom: 14px;
     background: #fdfdfe;
     transition: border-color 0.15s, opacity 0.15s;
-    transform: translateZ(0);
-    will-change: opacity;
   }
 
   .endpoint.disabled {
     opacity: 0.6;
   }
 
-  /* 该卡片的模型下拉展开时，整卡提到上层，避免被后面的卡片盖住 */
-  .endpoint.combo-open {
-    position: relative;
-    z-index: 100;
-  }
-
   .endpoint-head {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 12px;
     margin-bottom: 14px;
   }
@@ -622,21 +619,12 @@
     font-size: 13px;
     color: #444;
     cursor: pointer;
+    white-space: nowrap;
   }
 
   .switch input {
     width: auto;
     cursor: pointer;
-  }
-
-  .ep-name {
-    font-size: 13px;
-    font-weight: 600;
-    color: #2b2f38;
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   .grid {
@@ -725,7 +713,7 @@
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
     max-height: 220px;
     overflow-y: auto;
-    z-index: 50;
+    z-index: 100;
     box-sizing: border-box;
   }
 
@@ -815,6 +803,13 @@
     gap: 12px;
   }
 
+  /* 划词触发字符数：与下方功能项列表分隔 */
+  .trigger-row {
+    padding-bottom: 16px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid #f0f1f4;
+  }
+
   .field-row + .field-row,
   .field-row + .toggle-row,
   .toggle-row + .field-row {
@@ -836,6 +831,22 @@
     width: 180px;
     flex: none;
     text-align: center;
+  }
+
+  .hotkey-cell {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+  }
+
+  .hk-status {
+    font-size: 11px;
+    color: #d32f2f;
+  }
+
+  .hk-status.ok {
+    color: #2e7d32;
   }
 
   .toggle-row {
