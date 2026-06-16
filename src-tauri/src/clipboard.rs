@@ -2,11 +2,12 @@ use tauri::AppHandle;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::System::DataExchange::{
-    CloseClipboard, CountClipboardFormats, IsClipboardFormatAvailable, OpenClipboard, CF_TEXT,
-    CF_UNICODETEXT,
+    CloseClipboard, CountClipboardFormats, IsClipboardFormatAvailable, OpenClipboard,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 
+const CF_TEXT_FORMAT: u32 = 1;
+const CF_UNICODETEXT_FORMAT: u32 = 13;
 const CF_HDROP_FORMAT: u32 = 15;
 
 // 获取选中文本,返回 (选中的文本, 需要恢复的旧剪贴板内容)
@@ -77,7 +78,7 @@ fn clipboard_has_file_drop_data() -> bool {
             return false;
         }
 
-        let has_file_drop = IsClipboardFormatAvailable(CF_HDROP_FORMAT).as_bool();
+        let has_file_drop = IsClipboardFormatAvailable(CF_HDROP_FORMAT).is_ok();
         let _ = CloseClipboard();
 
         has_file_drop
@@ -91,8 +92,8 @@ fn clipboard_has_non_text_data() -> bool {
         }
 
         let has_formats = CountClipboardFormats() > 0;
-        let has_text = IsClipboardFormatAvailable(CF_UNICODETEXT.0).as_bool()
-            || IsClipboardFormatAvailable(CF_TEXT.0).as_bool();
+        let has_text = IsClipboardFormatAvailable(CF_UNICODETEXT_FORMAT).is_ok()
+            || IsClipboardFormatAvailable(CF_TEXT_FORMAT).is_ok();
         let _ = CloseClipboard();
 
         has_formats && !has_text
