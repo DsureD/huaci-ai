@@ -13,9 +13,10 @@ use commands::AppState;
 use std::sync::Mutex;
 use std::sync::OnceLock;
 use tauri::{
+    image::Image,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, WebviewUrl, WebviewWindowBuilder,
+    Manager,
 };
 use tauri_plugin_global_shortcut::ShortcutState;
 
@@ -28,8 +29,13 @@ pub static TRAY_ICON: OnceLock<tauri::tray::TrayIcon<tauri::Wry>> = OnceLock::ne
 const ICON_ACTIVE: &[u8] = include_bytes!("../icons/icon.ico");
 const ICON_DISABLED: &[u8] = include_bytes!("../icons/icon-gray.ico");
 
+pub fn capture_icon(enabled: bool) -> Option<Image<'static>> {
+    let bytes = if enabled { ICON_ACTIVE } else { ICON_DISABLED };
+    Image::from_bytes(bytes).ok()
+}
+
 // 切换捕获状态后同步托盘：菜单文字 + 图标（托盘 / 快捷键 / 设置页共用这一处逻辑）
-pub fn sync_capture_state(enabled: bool) {
+pub fn sync_capture_state(app: &tauri::AppHandle, enabled: bool) {
     if let Some(item) = TOGGLE_MENU_ITEM.get() {
         let _ = item.set_text(if enabled {
             "禁用划词监听"
@@ -38,9 +44,13 @@ pub fn sync_capture_state(enabled: bool) {
         });
     }
     if let Some(tray) = TRAY_ICON.get() {
-        let bytes = if enabled { ICON_ACTIVE } else { ICON_DISABLED };
-        if let Ok(icon) = tauri::image::Image::from_bytes(bytes) {
+        if let Some(icon) = capture_icon(enabled) {
             let _ = tray.set_icon(Some(icon));
+        }
+    }
+    if let Some(win) = app.get_webview_window("settings") {
+        if let Some(icon) = capture_icon(enabled) {
+            let _ = win.set_icon(icon);
         }
     }
 }
@@ -96,10 +106,10 @@ fn main() {
                     "toggle" => {
                         let new_state = !mouse_hook::is_capture_enabled();
                         mouse_hook::set_capture_enabled(new_state);
-                        sync_capture_state(new_state); // 文字 + 图标一起同步
+                        sync_capture_state(app, new_state); // 文字 + 图标一起同步
                     }
                     "settings" => {
-                        open_settings_window(app);
+                        let _ = commands::open_settings_window(app);
                     }
                     "quit" => {
                         app.exit(0);
@@ -113,7 +123,7 @@ fn main() {
                         ..
                     } = event
                     {
-                        open_settings_window(tray.app_handle());
+                        let _ = commands::open_settings_window(tray.app_handle());
                     } else if let TrayIconEvent::Click {
                         button: MouseButton::Right,
                         button_state: MouseButtonState::Up,
@@ -160,24 +170,4 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("运行 Tauri 应用时出错");
-}
-
-// 打开（或聚焦）设置窗口
-fn open_settings_window(app: &tauri::AppHandle) {
-    if let Some(win) = app.get_webview_window("settings") {
-        let _ = win.show();
-        let _ = win.set_focus();
-        return;
-    }
-
-    let _ = WebviewWindowBuilder::new(
-        app,
-        "settings",
-        WebviewUrl::App("index.html?view=settings".into()),
-    )
-    .title("划词AI - 设置")
-    .inner_size(560.0, 640.0)
-    .resizable(true)
-    .center()
-    .build();
 }

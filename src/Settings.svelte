@@ -105,6 +105,20 @@
   function removeEndpoint(index: number) {
     if (!config) return;
     config.api.endpoints = config.api.endpoints.filter((_, i) => i !== index);
+    modelOptions = removeIndexedState(modelOptions, index);
+    modelLoading = removeIndexedState(modelLoading, index);
+    modelMsg = removeIndexedState(modelMsg, index);
+    modelOpen = removeIndexedState(modelOpen, index);
+  }
+
+  function removeIndexedState<T>(state: Record<number, T>, removedIndex: number) {
+    const next: Record<number, T> = {};
+    for (const [key, value] of Object.entries(state)) {
+      const index = Number(key);
+      if (!Number.isInteger(index) || index === removedIndex) continue;
+      next[index > removedIndex ? index - 1 : index] = value;
+    }
+    return next;
   }
 
   // ===== 划词功能项 =====
@@ -121,6 +135,7 @@
   function removeAction(index: number) {
     if (!config) return;
     config.actions = config.actions.filter((_, i) => i !== index);
+    iconPickerOpen = removeIndexedState(iconPickerOpen, index);
   }
 
   // 「自动」互斥：同时只能有一个功能勾选自动执行，勾选某项时自动取消其它项

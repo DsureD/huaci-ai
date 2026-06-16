@@ -177,7 +177,7 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut) {
         if shortcut == &sc {
             let new_state = !mouse_hook::is_capture_enabled();
             mouse_hook::set_capture_enabled(new_state);
-            crate::sync_capture_state(new_state); // 同步托盘文字 + 图标，让切换可见
+            crate::sync_capture_state(app, new_state); // 同步托盘/窗口文字与图标，让切换可见
             return;
         }
     }
@@ -198,9 +198,9 @@ pub fn load_config(state: State<'_, AppState>) -> Result<config::Config, String>
 
 // 切换划词捕获（设置页开关调用）
 #[tauri::command]
-pub fn toggle_capture(enabled: bool) -> Result<bool, String> {
+pub fn toggle_capture(app: AppHandle, enabled: bool) -> Result<bool, String> {
     mouse_hook::set_capture_enabled(enabled);
-    crate::sync_capture_state(enabled); // 同步托盘文字 + 图标
+    crate::sync_capture_state(&app, enabled); // 同步托盘/窗口文字与图标
     Ok(enabled)
 }
 
@@ -335,10 +335,17 @@ pub async fn list_models(
 // 打开（或聚焦）设置窗口
 #[tauri::command]
 pub fn open_settings(app: AppHandle) -> Result<(), String> {
+    open_settings_window(&app)
+}
+
+pub fn open_settings_window(app: &AppHandle) -> Result<(), String> {
     // 先尝试销毁旧窗口(如果存在但已无效),避免累积
     if let Some(win) = app.get_webview_window("settings") {
         // 检查窗口是否仍然有效(可见或可聚焦)
         if win.is_visible().unwrap_or(false) || win.set_focus().is_ok() {
+            if let Some(icon) = crate::capture_icon(mouse_hook::is_capture_enabled()) {
+                let _ = win.set_icon(icon);
+            }
             let _ = win.show();
             let _ = win.set_focus();
             return Ok(());
@@ -349,7 +356,7 @@ pub fn open_settings(app: AppHandle) -> Result<(), String> {
     }
 
     let win = WebviewWindowBuilder::new(
-        &app,
+        app,
         "settings",
         WebviewUrl::App("index.html?view=settings".into()),
     )
@@ -359,6 +366,10 @@ pub fn open_settings(app: AppHandle) -> Result<(), String> {
     .center()
     .build()
     .map_err(|e| e.to_string())?;
+
+    if let Some(icon) = crate::capture_icon(mouse_hook::is_capture_enabled()) {
+        let _ = win.set_icon(icon);
+    }
 
     // 监听窗口关闭事件,主动销毁以释放资源
     let _ = win.on_window_event(|event| {

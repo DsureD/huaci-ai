@@ -1,6 +1,13 @@
 use tauri::AppHandle;
 use tauri_plugin_clipboard_manager::ClipboardExt;
+use windows::Win32::Foundation::HWND;
+use windows::Win32::System::DataExchange::{
+    CloseClipboard, CountClipboardFormats, IsClipboardFormatAvailable, OpenClipboard, CF_TEXT,
+    CF_UNICODETEXT,
+};
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
+
+const CF_HDROP_FORMAT: u32 = 15;
 
 // 获取选中文本,返回 (选中的文本, 需要恢复的旧剪贴板内容)
 pub fn get_selected_text(app: &AppHandle) -> anyhow::Result<(String, Option<String>)> {
@@ -13,6 +20,14 @@ pub fn get_selected_text(app: &AppHandle) -> anyhow::Result<(String, Option<Stri
     // 回退：少数不支持 UIA TextPattern 的控件，才退回到模拟 Ctrl+C 取词
     // 保存当前剪贴板内容
     let old_clipboard = app.clipboard().read_text().ok();
+    // 如果当前剪贴板有文件、图片等非文本内容，不能用文本哨兵覆盖它。
+    // 例如资源管理器里 Ctrl+C 复制文件后，双击会触发取词；此时写入任何文本都会让“粘贴文件”失效。
+    if clipboard_has_file_drop_data()
+        || (old_clipboard.is_none() && clipboard_has_non_text_data())
+    {
+        return Ok((String::new(), None));
+    }
+
     let sentinel = format!(
         "__HUACI_AI_COPY_SENTINEL_{}__",
         std::time::SystemTime::now()
@@ -53,6 +68,34 @@ pub fn get_selected_text(app: &AppHandle) -> anyhow::Result<(String, Option<Stri
         Ok((String::new(), None))
     } else {
         Ok((selected_text, old_clipboard))
+    }
+}
+
+fn clipboard_has_file_drop_data() -> bool {
+    unsafe {
+        if OpenClipboard(HWND(std::ptr::null_mut())).is_err() {
+            return false;
+        }
+
+        let has_file_drop = IsClipboardFormatAvailable(CF_HDROP_FORMAT).as_bool();
+        let _ = CloseClipboard();
+
+        has_file_drop
+    }
+}
+
+fn clipboard_has_non_text_data() -> bool {
+    unsafe {
+        if OpenClipboard(HWND(std::ptr::null_mut())).is_err() {
+            return false;
+        }
+
+        let has_formats = CountClipboardFormats() > 0;
+        let has_text = IsClipboardFormatAvailable(CF_UNICODETEXT.0).as_bool()
+            || IsClipboardFormatAvailable(CF_TEXT.0).as_bool();
+        let _ = CloseClipboard();
+
+        has_formats && !has_text
     }
 }
 

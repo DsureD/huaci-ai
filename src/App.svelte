@@ -45,7 +45,28 @@
   let requestSeq = 0;
   let suppressAutoCloseUntil = 0;
 
-  $: renderedHtml = resultText ? (marked.parse(resultText) as string) : '';
+  $: renderedHtml = resultText ? sanitizeHtml(marked.parse(resultText) as string) : '';
+
+  function sanitizeHtml(html: string) {
+    const template = document.createElement('template');
+    template.innerHTML = html;
+
+    template.content
+      .querySelectorAll('script, style, iframe, object, embed, link, meta')
+      .forEach((el) => el.remove());
+
+    template.content.querySelectorAll('*').forEach((el) => {
+      for (const attr of Array.from(el.attributes)) {
+        const name = attr.name.toLowerCase();
+        const value = attr.value.trim().toLowerCase();
+        if (name.startsWith('on') || value.startsWith('javascript:')) {
+          el.removeAttribute(attr.name);
+        }
+      }
+    });
+
+    return template.innerHTML;
+  }
 
   // 根据内容把窗口调整为刚好包住内容的大小（交给 Rust 设置，避免前端 DPI 计算出错）
   async function resizeToContent() {
@@ -314,7 +335,9 @@
             <span class="badge">
               {currentAction?.name ?? ''}
             </span>
-            {#if resultEndpoint}
+            {#if isLoading}
+              <span class="model-info loading-title">{loadingStatus || '正在请求…'}</span>
+            {:else if resultEndpoint}
               <span class="model-info">{resultEndpoint} · {resultModel}</span>
             {/if}
           </div>
@@ -354,7 +377,6 @@
           <div class="loading-dots">
             <span></span><span></span><span></span>
           </div>
-          <div class="loading-status">{loadingStatus}</div>
         {:else}
           <div class="result-text" on:click={onResultClick}>{@html renderedHtml}</div>
         {/if}
@@ -457,7 +479,7 @@
   }
 
   .result-card.loading {
-    min-height: 92px;
+    min-height: 66px;
   }
 
   .card-head {
@@ -496,6 +518,10 @@
     overflow: hidden;
     text-overflow: ellipsis;
     font-weight: 500;
+  }
+
+  .loading-title {
+    color: #6a707c;
   }
 
   .head-actions {
@@ -649,16 +675,8 @@
     gap: 6px;
     justify-content: center;
     align-items: center;
-    height: 30px;
-    padding: 14px 0 6px;
-  }
-
-  .loading-status {
-    text-align: center;
-    font-size: 12px;
-    color: #8a909c;
-    min-height: 18px;
-    padding: 0 12px 10px;
+    height: 24px;
+    padding: 8px 0 2px;
   }
 
   .loading-dots span {

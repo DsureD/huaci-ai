@@ -63,14 +63,7 @@ pub async fn list_models(
     proxy: &ProxyConfig,
     timeout: Duration,
 ) -> anyhow::Result<Vec<String>> {
-    let mut client_builder = Client::builder().timeout(timeout);
-
-    if proxy.enabled {
-        let proxy_url = format!("http://{}:{}", proxy.host, proxy.port);
-        client_builder = client_builder.proxy(reqwest::Proxy::all(&proxy_url)?);
-    }
-
-    let client = client_builder.build()?;
+    let client = build_client(proxy, timeout)?;
 
     let url = format!("{}/models", base_url.trim_end_matches('/'));
 
@@ -94,22 +87,11 @@ pub async fn list_models(
 
 // 翻译文本
 pub async fn translate_text(
+    client: &Client,
     text: &str,
     endpoint: &ApiEndpoint,
     prompt_template: &str,
-    proxy: &ProxyConfig,
-    timeout: Duration,
 ) -> anyhow::Result<String> {
-    // 构建 HTTP 客户端
-    let mut client_builder = Client::builder().timeout(timeout);
-
-    if proxy.enabled {
-        let proxy_url = format!("http://{}:{}", proxy.host, proxy.port);
-        client_builder = client_builder.proxy(reqwest::Proxy::all(&proxy_url)?);
-    }
-
-    let client = client_builder.build()?;
-
     // 构建提示词
     let prompt = prompt_template.replace("{text}", text);
 
@@ -157,38 +139,39 @@ pub async fn translate_text(
     }
     let response_text = String::from_utf8_lossy(&response_bytes).to_string();
 
-    // 调试日志:打印前 500 字符
-    if response_text.len() > 500 {
-        eprintln!("API 响应(前500字符): {}", &response_text[..500]);
-    } else {
-        eprintln!("API 响应: {}", response_text);
-    }
-
     let chat_response: ChatResponse = serde_json::from_str(&response_text)
-        .map_err(|e| anyhow::anyhow!(
-            "解析 API 响应失败: {}。原始响应: {}",
-            e,
-            if response_text.len() > 300 {
-                format!("{}...", &response_text[..300])
-            } else {
-                response_text.clone()
-            }
-        ))?;
+        .map_err(|e| anyhow::anyhow!("解析 API 响应失败: {}", e))?;
 
     if let Some(choice) = chat_response.choices.first() {
         if let Some(content) = &choice.message.content {
             Ok(content.trim().to_string())
         } else {
-            Err(anyhow::anyhow!(
-                "API 返回的 message.content 为空。完整响应: {}",
-                if response_text.len() > 300 {
-                    format!("{}...", &response_text[..300])
-                } else {
-                    response_text
-                }
-            ))
+            Err(anyhow::anyhow!("API 返回的 message.content 为空"))
         }
     } else {
         Err(anyhow::anyhow!("API 返回空 choices 数组"))
+    }
+}
+
+pub fn build_client(proxy: &ProxyConfig, timeout: Duration) -> anyhow::Result<Client> {
+    let timeout = normalize_timeout(timeout);
+    let connect_timeout = timeout.min(Duration::from_secs(10));
+    let mut client_builder = Client::builder()
+        .timeout(timeout)
+        .connect_timeout(connect_timeout);
+
+    if proxy.enabled {
+        let proxy_url = format!("http://{}:{}", proxy.host, proxy.port);
+        client_builder = client_builder.proxy(reqwest::Proxy::all(&proxy_url)?);
+    }
+
+    Ok(client_builder.build()?)
+}
+
+pub fn normalize_timeout(timeout: Duration) -> Duration {
+    if timeout.is_zero() {
+        Duration::from_secs(1)
+    } else {
+        timeout
     }
 }
