@@ -87,6 +87,16 @@ pub fn install_mouse_hook(app_handle: AppHandle) -> anyhow::Result<()> {
                         continue;
                     }
 
+                    // 弹窗内的点击、拖动标题栏、双击按钮都属于弹窗交互，不能再进入
+                    // 划词取词流程；否则会清空当前结果并可能触发 Ctrl+C 回退。
+                    if point_in_popup(up.0, up.1)
+                        || down
+                            .map(|(x, y)| point_in_popup(x, y))
+                            .unwrap_or(false)
+                    {
+                        continue;
+                    }
+
                     let is_drag = match down {
                         Some((dx, dy)) => {
                             (up.0 - dx).abs() >= DRAG_THRESHOLD
@@ -161,6 +171,13 @@ fn popup_outside(x: i32, y: i32) -> bool {
     if !POPUP_VISIBLE.load(Ordering::Relaxed) {
         return false;
     }
+    !point_in_popup(x, y)
+}
+
+fn point_in_popup(x: i32, y: i32) -> bool {
+    if !POPUP_VISIBLE.load(Ordering::Relaxed) {
+        return false;
+    }
     let h = POPUP_HWND.load(Ordering::Relaxed);
     if h == 0 {
         return false;
@@ -169,9 +186,7 @@ fn popup_outside(x: i32, y: i32) -> bool {
         let hwnd = HWND(h as *mut _);
         let mut rect = RECT::default();
         if GetWindowRect(hwnd, &mut rect).is_ok() {
-            let inside =
-                x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
-            return !inside;
+            return x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
         }
     }
     false

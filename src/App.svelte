@@ -41,6 +41,8 @@
   let dragging = false; // 拖动中：临时屏蔽失焦关闭
   let popupAnchor: [number, number] = [0, 0]; // 最近一次划词锚点，切换到结果框时复用以原位重显
   let switching = false; // 工具条→结果框切换中：先隐藏旧帧再显示，期间屏蔽失焦/点外关闭
+  let resizeQueued = false;
+  let requestSeq = 0;
 
   $: renderedHtml = resultText ? (marked.parse(resultText) as string) : '';
 
@@ -50,14 +52,24 @@
     // 等一帧，确保 WebView 已完成布局
     await new Promise((r) => requestAnimationFrame(() => r(null)));
     if (!rootEl) return;
-    const width = Math.ceil(rootEl.offsetWidth);
-    const height = Math.ceil(rootEl.offsetHeight);
+    // 额外 2px 给透明窗口里的阴影/动画留出余量，避免 WebView 边界裁掉底部。
+    const width = Math.ceil(rootEl.offsetWidth) + 2;
+    const height = Math.ceil(rootEl.offsetHeight) + 2;
     if (width <= 0 || height <= 0) return;
     try {
       await invoke('resize_popup', { width, height });
     } catch (e) {
       console.error('调整窗口尺寸失败:', e);
     }
+  }
+
+  function scheduleResizeToContent() {
+    if (resizeQueued) return;
+    resizeQueued = true;
+    requestAnimationFrame(() => {
+      resizeQueued = false;
+      resizeToContent();
+    });
   }
 
   // 内容变化时重新测量
@@ -67,7 +79,7 @@
     void resultEndpoint;
     void isLoading;
     void loadingStatus;
-    resizeToContent();
+    scheduleResizeToContent();
   }
 
   onMount(async () => {
@@ -82,17 +94,20 @@
     });
 
     // 故障转移进度：显示正在请求第几个接口
-    await listen<{ index: number; total: number; endpoint: string }>('translate-progress', (event) => {
+    await listen<{ request_id: number; index: number; total: number; endpoint: string }>('translate-progress', (event) => {
       if (!isLoading) return;
       const p = event.payload;
+      if (p.request_id !== requestSeq) return;
       loadingStatus = p.total > 1
         ? `正在请求 ${p.endpoint}（${p.index}/${p.total}）…`
         : `正在请求 ${p.endpoint}…`;
     });
 
     await listen<[number, number]>('text-selected', async (event) => {
+      const selectionSeq = ++requestSeq;
       try {
         const [text, , oldClipboard] = await invoke<[string, boolean, string | null]>('get_selected_text');
+        if (selectionSeq !== requestSeq) return;
         if (!text || text.trim().length === 0) return;
 
         selectedText = text;
@@ -160,12 +175,14 @@
   }
 
   async function doTranslate(action: ActionItem) {
+    const runSeq = ++requestSeq;
     currentAction = action;
     // 先隐藏弹窗，把「工具条」这一帧从屏幕上彻底擦掉，避免它与结果框在透明窗口上重叠残留(tauri#12800)。
     // 切换期间屏蔽失焦/点外关闭，以免 hide 触发误关。
     switching = true;
     try {
       await invoke('hide_popup');
+      if (runSeq !== requestSeq) return;
       mode = 'result';
       isLoading = true;
       loadingStatus = '';
@@ -176,14 +193,18 @@
       await invoke('show_popup', { x: popupAnchor[0], y: popupAnchor[1] });
       await resizeToContent();
     } finally {
-      switching = false;
+      if (runSeq === requestSeq) switching = false;
     }
+
+    if (runSeq !== requestSeq) return;
 
     try {
       const result = await invoke<{ text: string; endpoint_name: string; model: string }>('translate_text', {
         text: selectedText,
         prompt: action.prompt,
+        requestId: runSeq,
       });
+      if (runSeq !== requestSeq) return;
 
       // 防止超大响应撑爆渲染(前端保护,后端也有 2MB 限制)
       if (result.text.length > 50000) {
@@ -195,10 +216,13 @@
       resultEndpoint = result.endpoint_name;
       resultModel = result.model;
     } catch (error) {
+      if (runSeq !== requestSeq) return;
       resultText = '失败: ' + error;
     } finally {
-      isLoading = false;
-      await resizeToContent();
+      if (runSeq === requestSeq) {
+        isLoading = false;
+        await resizeToContent();
+      }
     }
   }
 
@@ -237,13 +261,19 @@
   }
 
   async function closeWindow() {
+    requestSeq++;
     selectedText = '';
     resultText = '';
     resultEndpoint = '';
     resultModel = '';
+    currentAction = null;
     mode = 'toolbar';
+    isLoading = false;
+    loadingStatus = '';
     pinned = false;
     copied = false;
+    switching = false;
+    dragging = false;
     await invoke('hide_popup');
   }
 </script>
@@ -264,7 +294,7 @@
         <button class="close-btn" on:click={closeWindow} aria-label="关闭">×</button>
       </div>
     {:else}
-      <div class="result-card">
+      <div class="result-card" class:loading={isLoading}>
         <div class="card-head" on:mousedown={startDrag} role="toolbar" tabindex="-1">
           <div class="head-left">
             <span class="badge">
@@ -310,9 +340,7 @@
           <div class="loading-dots">
             <span></span><span></span><span></span>
           </div>
-          {#if loadingStatus}
-            <div class="loading-status">{loadingStatus}</div>
-          {/if}
+          <div class="loading-status">{loadingStatus}</div>
         {:else}
           <div class="result-text" on:click={onResultClick}>{@html renderedHtml}</div>
         {/if}
@@ -338,7 +366,7 @@
   /* 内容容器：宽高随内容自适应（窗口被 Rust 设为同样大小） */
   .popup {
     display: inline-block;
-    padding: 8px;
+    padding: 10px;
     box-sizing: border-box;
   }
 
@@ -412,6 +440,10 @@
     border-radius: 14px;
     box-shadow: 0 3px 12px rgba(0, 0, 0, 0.16);
     box-sizing: border-box;
+  }
+
+  .result-card.loading {
+    min-height: 92px;
   }
 
   .card-head {
@@ -603,13 +635,15 @@
     gap: 6px;
     justify-content: center;
     align-items: center;
-    padding: 12px 0;
+    height: 30px;
+    padding: 14px 0 6px;
   }
 
   .loading-status {
     text-align: center;
     font-size: 12px;
     color: #8a909c;
+    min-height: 18px;
     padding: 0 12px 10px;
   }
 

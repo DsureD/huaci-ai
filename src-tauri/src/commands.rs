@@ -28,6 +28,7 @@ pub struct TranslateResult {
 // 故障转移进度：第 index/total 个接口，名为 endpoint
 #[derive(Serialize, Clone)]
 struct TranslateProgress {
+    request_id: u64,
     index: usize,
     total: usize,
     endpoint: String,
@@ -57,6 +58,7 @@ pub async fn translate_text(
     app: AppHandle,
     text: String,
     prompt: String,
+    request_id: u64,
     state: State<'_, AppState>,
 ) -> Result<TranslateResult, String> {
     let config = state.config.lock().unwrap().clone();
@@ -80,6 +82,7 @@ pub async fn translate_text(
             let _ = app.emit(
                 "translate-progress",
                 TranslateProgress {
+                    request_id,
                     index,
                     total,
                     endpoint: name.to_string(),
