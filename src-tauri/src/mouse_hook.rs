@@ -89,6 +89,12 @@ pub fn install_mouse_hook(app_handle: AppHandle) -> anyhow::Result<()> {
                         continue;
                     }
 
+                    // 设置页/悬浮窗等本应用窗口内的划选不应触发全局划词。
+                    // 否则会对自己的 WebView 做 UIA/剪贴板取词，容易造成重入和卡顿。
+                    if is_own_process_foreground() {
+                        continue;
+                    }
+
                     // 弹窗内的点击、拖动标题栏、双击按钮都属于弹窗交互，不能再进入
                     // 划词取词流程；否则会清空当前结果并可能触发 Ctrl+C 回退。
                     if point_in_popup(up.0, up.1)
@@ -261,6 +267,29 @@ fn foreground_class_name() -> Option<String> {
             return None;
         }
         Some(String::from_utf16_lossy(&buf[..len as usize]))
+    }
+}
+
+fn is_own_process_foreground() -> bool {
+    foreground_process_id()
+        .map(|pid| pid == std::process::id())
+        .unwrap_or(false)
+}
+
+fn foreground_process_id() -> Option<u32> {
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.0.is_null() {
+            return None;
+        }
+
+        let mut pid = 0u32;
+        let _ = GetWindowThreadProcessId(hwnd, Some(&mut pid as *mut u32));
+        if pid == 0 {
+            None
+        } else {
+            Some(pid)
+        }
     }
 }
 
