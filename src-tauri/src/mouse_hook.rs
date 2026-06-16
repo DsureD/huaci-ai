@@ -20,6 +20,8 @@ static POPUP_VISIBLE: AtomicBool = AtomicBool::new(false);
 
 // 拖动判定阈值（物理像素）：任一轴位移达到它才算“拖选”，否则视为单击
 const DRAG_THRESHOLD: i32 = 5;
+// 近窗口右/下边缘的明显单轴拖动大概率是拖滚条，不应触发划词。
+const SCROLLBAR_EDGE_PX: i32 = 24;
 // 双击判定：两次抬起的间隔与位移阈值（用于支持“双击选词”）
 const DBLCLICK_MS: u128 = 400;
 const DBLCLICK_DIST: i32 = 6;
@@ -104,6 +106,10 @@ pub fn install_mouse_hook(app_handle: AppHandle) -> anyhow::Result<()> {
                         }
                         None => false,
                     };
+
+                    if is_drag && down.map(|p| is_scrollbar_like_drag(p, up)).unwrap_or(false) {
+                        continue;
+                    }
 
                     let now = Instant::now();
                     let is_double = match last_up {
@@ -190,6 +196,45 @@ fn point_in_popup(x: i32, y: i32) -> bool {
         }
     }
     false
+}
+
+fn is_scrollbar_like_drag(down: (i32, i32), up: (i32, i32)) -> bool {
+    let dx = (up.0 - down.0).abs();
+    let dy = (up.1 - down.1).abs();
+
+    if dy >= dx.saturating_mul(2)
+        && (point_near_window_edge(down.0, down.1).0
+            || point_near_window_edge(up.0, up.1).0)
+    {
+        return true;
+    }
+
+    if dx >= dy.saturating_mul(2)
+        && (point_near_window_edge(down.0, down.1).1
+            || point_near_window_edge(up.0, up.1).1)
+    {
+        return true;
+    }
+
+    false
+}
+
+fn point_near_window_edge(x: i32, y: i32) -> (bool, bool) {
+    unsafe {
+        let hwnd = WindowFromPoint(POINT { x, y });
+        if hwnd.0.is_null() {
+            return (false, false);
+        }
+
+        let mut rect = RECT::default();
+        if GetWindowRect(hwnd, &mut rect).is_err() {
+            return (false, false);
+        }
+
+        let near_right = x >= rect.right - SCROLLBAR_EDGE_PX && x < rect.right;
+        let near_bottom = y >= rect.bottom - SCROLLBAR_EDGE_PX && y < rect.bottom;
+        (near_right, near_bottom)
+    }
 }
 
 // 前台窗口是否是终端/控制台（这类程序里 Ctrl+C = 中断，且多数不支持 UIA 取词）

@@ -13,30 +13,53 @@ pub fn get_selected_text(app: &AppHandle) -> anyhow::Result<(String, Option<Stri
     // 回退：少数不支持 UIA TextPattern 的控件，才退回到模拟 Ctrl+C 取词
     // 保存当前剪贴板内容
     let old_clipboard = app.clipboard().read_text().ok();
+    let sentinel = format!(
+        "__HUACI_AI_COPY_SENTINEL_{}__",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default()
+    );
 
-    // 直接模拟 Ctrl+C(不清空,避免触发终端副作用)
+    // 先写入哨兵值。Ctrl+C 后如果剪贴板仍是哨兵，说明这次操作并没有复制出选中文本，
+    // 不能拿旧剪贴板内容当作“本次选中”来弹窗。
+    app.clipboard()
+        .write_text(sentinel.clone())
+        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+
     simulate_ctrl_c()?;
 
-    // 等待剪贴板更新(稍长一点确保复制完成)
-    std::thread::sleep(std::time::Duration::from_millis(120));
+    // 等待剪贴板从哨兵值变为复制结果；多数应用很快完成，少数应用稍慢。
+    let mut new_clipboard = None;
+    for _ in 0..10 {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        new_clipboard = app.clipboard().read_text().ok();
+        if new_clipboard.as_deref() != Some(sentinel.as_str()) {
+            break;
+        }
+    }
 
-    // 读取新内容
-    let new_clipboard = app.clipboard().read_text().ok();
-
-    // 取词动作（拖选/双击）已确认存在选区，这里只要 Ctrl+C 拿到非空内容（长度≥2，排除单字符误触发）
-    // 就视为选中文本——即便它与旧剪贴板相同也照常弹窗（修复“划词内容与剪贴板一致时不弹窗”）。
     let selected_text = match &new_clipboard {
-        Some(new) if new.trim().chars().count() >= 2 => new.trim().to_string(),
+        Some(new) if new != &sentinel && new.trim().chars().count() >= 2 => {
+            new.trim().to_string()
+        }
         _ => String::new(),
     };
 
     // 返回选中文本和旧剪贴板内容,让调用方决定何时恢复
     // (立即恢复会触发终端清空选区,需延迟到弹窗显示后)
     if selected_text.is_empty() {
+        restore_clipboard_now(app, old_clipboard.as_deref());
         Ok((String::new(), None))
     } else {
         Ok((selected_text, old_clipboard))
     }
+}
+
+fn restore_clipboard_now(app: &AppHandle, old_text: Option<&str>) {
+    let _ = app
+        .clipboard()
+        .write_text(old_text.unwrap_or_default().to_string());
 }
 
 // 模拟 Ctrl+C 按键
