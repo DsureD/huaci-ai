@@ -1,42 +1,42 @@
-# 划词AI - 轻量级划词翻译工具
+# 划词AI
 
-一个基于 Tauri + Rust 构建的轻量级 Windows 划词翻译工具，支持自定义 AI 大模型接口。
+轻量级 Windows 划词翻译工具。选中文本后自动调用 OpenAI 兼容接口翻译，并在鼠标附近显示结果。
 
-## ✨ 功能特性
+## 功能特性
 
-- 🖱️ **划词自动翻译** - 鼠标选中文本后自动触发翻译
-- 🔄 **多接口故障转移** - 支持配置多个 API 接口，自动切换
-- 🌐 **代理支持** - 支持 HTTP 代理配置
-- 🎨 **悬浮窗显示** - 翻译结果以悬浮窗形式在鼠标附近展示
-- 📋 **剪贴板保护** - 自动保存和恢复原剪贴板内容
-- 💾 **便携模式** - 支持配置文件放在程序目录
-- ⚙️ **可视化设置** - 内置设置界面，无需手动编辑 JSON
-- 🔧 **高度可配置** - 自定义 API、提示词、快捷键等
+- 划词自动翻译：在任意应用中选中文本后自动触发翻译
+- 多接口故障转移：可配置多个 OpenAI 兼容接口，按优先级自动切换
+- 可视化设置：通过托盘菜单打开设置界面，无需手动编辑 JSON
+- 代理支持：支持 HTTP 代理配置
+- 悬浮窗展示：翻译结果以小窗形式显示在鼠标附近
+- 剪贴板保护：读取选中文本时会尽量保存并恢复原剪贴板内容
+- 便携模式：便携版配置文件与程序放在同一目录，方便备份和迁移
 
-## 🚀 快速开始
+## 下载安装
 
-### 下载安装
+前往 [GitHub Releases](https://github.com/DsureD/huaci-ai/releases) 下载最新版本。
 
-前往 [Releases](https://github.com/你的用户名/huaci-ai0613/releases) 页面下载最新版本：
+- `HuaciAI_x.x.x_x64_Portable.zip`：便携版，解压后直接运行 `huaci-ai.exe`
+- `huaci-ai_x.x.x_x64_zh-CN.msi` 或 `huaci-ai_x.x.x_x64_en-US.msi`：MSI 安装包
+- `huaci-ai_x.x.x_x64-setup.exe`：NSIS 安装程序
 
-- **`HuaciAI_x.x.x_x64_Portable.zip`** - 便携版（推荐，免安装）
-- `huaci-ai_x.x.x_x64_en-US.msi` - MSI 安装包
-- `huaci-ai_x.x.x_x64-setup.exe` - NSIS 安装程序
+推荐使用便携版。便携包只包含主程序、`config.json` 和 `使用说明.txt`，不会额外打包 `启动程序.bat` 或项目 README。
 
-**推荐使用便携版**：解压即用，配置文件在同目录下，方便备份和迁移。
+## 快速使用
 
-### 配置 API
+1. 解压便携版，双击 `huaci-ai.exe` 启动程序。
+2. 程序启动后会最小化到系统托盘。
+3. 右键托盘图标选择「设置」，或双击托盘图标打开设置界面。
+4. 填写 API Key、模型、接口地址、代理等配置并保存。
+5. 在任意应用中选中文本，等待 1-2 秒显示翻译结果。
 
-**推荐：使用设置界面**
+如果使用安装版，首次运行后配置文件位于 `%APPDATA%\huaci-ai\config.json`。便携版配置文件位于程序同目录的 `config.json`。
 
-右键系统托盘图标选择「设置」（或双击托盘图标），在可视化界面中填写 API Key、模型、代理、提示词等，点击保存即可，无需手动编辑 JSON。
+## 配置说明
 
-**手动编辑配置文件**
+优先通过设置界面配置。需要手动编辑时，可参考 `config.example.json`。
 
-- 便携版：编辑程序目录下的 `config.json`
-- 安装版：首次运行会在 `C:\Users\你的用户名\AppData\Roaming\huaci-ai\config.json` 生成配置文件
-
-编辑配置文件，填入你的 API 信息：
+常用 API 配置示例：
 
 ```json
 {
@@ -55,7 +55,7 @@
         "name": "备用接口",
         "base_url": "https://你的备用接口/v1",
         "api_key": "sk-备用密钥",
-        "model": "llama-3.1-70b",
+        "model": "deepseek-chat",
         "enabled": true,
         "priority": 2
       }
@@ -64,150 +64,120 @@
 }
 ```
 
-## 📖 使用方法
-
-1. **启动程序** - 双击 `huaci-ai.exe`，程序会最小化到系统托盘（任务栏右下角）
-2. **配置 API** - 右键托盘图标选择「设置」，填入你的 API Key 并保存
-3. **划词翻译** - 在任意应用中用鼠标选中文本，等待 1-2 秒自动弹出翻译结果
-4. **托盘菜单** - 右键托盘图标可以：
-   - 启用/禁用划词监听（菜单文字会随状态变化）
-   - 打开设置界面
-   - 退出程序
-   - 双击托盘图标也可直接打开设置
-
-**提示**：如果没有反应，请检查：
-- 是否已在设置中配置有效的 API Key
-- 选中的文本是否太短（默认最少 1 个字符）
-- 程序是否被杀毒软件拦截（划词依赖全局鼠标钩子，可能被拦截，请添加信任）
-
-## ⚙️ 配置说明
-
-### 应用设置
+其他常用配置：
 
 ```json
 {
   "app": {
-    "auto_translate": true,        // 是否自动翻译
-    "min_text_length": 1           // 最小文本长度
-  }
-}
-```
-
-### 快捷键
-
-```json
-{
+    "auto_translate": true,
+    "min_text_length": 1
+  },
   "hotkeys": {
-    "toggle_capture": "Ctrl+Shift+H",  // 切换划词监听
-    "manual_translate": "Ctrl+Q"        // 手动翻译
-  }
-}
-```
-
-### 代理设置
-
-```json
-{
+    "toggle_capture": "Ctrl+Shift+H",
+    "manual_translate": "Ctrl+Q"
+  },
   "proxy": {
-    "enabled": false,              // 是否启用代理
-    "host": "127.0.0.1",          // 代理主机
-    "port": 7890                   // 代理端口
+    "enabled": false,
+    "host": "127.0.0.1",
+    "port": 7890
   }
 }
 ```
 
-### 提示词模板
+## 托盘菜单
 
-```json
-{
-  "prompts": {
-    "translate": "你是专业的翻译助手。将以下文本翻译成中文：\n\n{text}",
-    "explain": "请简洁地解释以下内容：\n\n{text}"
-  }
-}
-```
+右键托盘图标可以：
 
-## 🛠️ 本地开发
+- 启用或禁用划词监听
+- 打开设置界面
+- 退出程序
 
-### 环境要求
+双击托盘图标可直接打开设置界面。
+
+## 本地开发
+
+环境要求：
 
 - Node.js 20+
-- Rust 1.70+
+- Rust stable
 - Windows 10/11
 
-### 首次初始化（推送到 GitHub 前）
-
-如果你要推送到 GitHub 让 Actions 自动构建，先生成完整的 package-lock.json：
-
-```bash
-# 安装依赖（会生成完整的 package-lock.json）
-npm install
-
-# 提交更新后的 package-lock.json
-git add package-lock.json
-git commit -m "Add package-lock.json"
-git push
-```
-
-### 安装依赖
+安装依赖：
 
 ```bash
 npm install
 ```
 
-### 开发模式
+开发模式：
 
 ```bash
 npm run tauri dev
 ```
 
-### 构建
+构建安装包：
 
 ```bash
 npm run tauri build
 ```
 
-## 📦 技术栈
+构建便携版：
 
-- **前端**: Svelte 5 + TypeScript + Vite
-- **后端**: Rust + Tauri 2.0
-- **Windows API**: windows-rs
-- **HTTP 客户端**: reqwest
+```powershell
+.\build-portable.ps1
+```
 
-## ⚠️ 注意事项
+构建产物位于 `src-tauri/target/release/bundle/`。
 
-1. **WebView2** - 需要 Windows 10 1809+ 或 Windows 11（内置 WebView2）
-2. **权限** - 程序使用全局鼠标钩子，可能被杀毒软件拦截，请添加信任
-3. **兼容性** - 部分应用（如密码管理器）可能无法捕获选中文本
-4. **API Key 安全** - 请妥善保管配置文件，不要分享给他人
+## GitHub 自动发布
 
-## 🐛 已知问题
+GitHub Actions 只在推送 `v*` tag 时自动构建，不再在每次推送 `main` 或 Pull Request 时构建。
 
-- 某些使用自定义渲染的应用（如 Chrome Canvas）可能无法捕获文本
-- 高 DPI 显示器可能需要调整窗口大小
+发布新版本：
 
-## 📝 更新日志
+```bash
+git tag v1.0.1
+git push origin v1.0.1
+```
 
-### v0.1.0 (2026-06-13)
+工作流会自动构建 Windows 版本，并发布 GitHub Release，包含：
 
-- 🎉 首次发布
-- ✅ 基础划词翻译功能
-- ✅ 多 API 接口支持
-- ✅ 故障转移机制
-- ✅ 系统托盘
-- ✅ 可视化设置界面
-- ✅ 悬浮窗跟随鼠标定位
+- 便携版 ZIP
+- MSI 安装包
+- NSIS 安装程序
 
-## 📄 许可证
+## 技术栈
+
+- 前端：Svelte + TypeScript + Vite
+- 桌面框架：Tauri 2
+- 后端：Rust
+- Windows API：windows-rs
+- HTTP 客户端：reqwest
+
+## 常见问题
+
+程序没有反应：
+
+- 检查是否已配置有效 API Key
+- 检查划词监听是否处于启用状态
+- 检查选中文本长度是否小于配置的最小长度
+- 将程序添加到杀毒软件信任列表
+
+程序无法启动：
+
+- 确认系统已安装 WebView2 运行时
+- 检查 `config.json` 是否为合法 JSON
+
+翻译失败：
+
+- 检查 API Key、接口地址和模型名称
+- 检查网络或代理设置
+- 如果配置了多个接口，确认至少一个接口处于启用状态
+
+## 注意事项
+
+- 部分自定义渲染或安全敏感应用可能无法捕获选中文本
+- `config.json` 中包含 API Key，请妥善保管
+
+## 许可证
 
 MIT License
-
-## 🙏 致谢
-
-- [Tauri](https://tauri.app/) - 跨平台桌面应用框架
-- [Svelte](https://svelte.dev/) - 轻量级前端框架
-- [windows-rs](https://github.com/microsoft/windows-rs) - Windows API 绑定
-
----
-
-**Star ⭐ 这个项目如果你觉得有用！**

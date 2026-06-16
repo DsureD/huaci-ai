@@ -38,20 +38,25 @@ git push -u origin main
 
 ### 触发构建
 
-推送代码后，GitHub Actions 会自动构建：
+GitHub Actions 只在推送 `v*` tag 时自动构建并发布 Release，不再在每次推送 `main` 或 Pull Request 时构建。
 
-1. **自动触发**：推送到 `main` 分支
-2. **手动触发**：在 GitHub 仓库的 Actions 页面点击 "Run workflow"
-3. **发布版本**：创建 tag `git tag v0.1.0 && git push origin v0.1.0`
+发布版本：
 
-### 下载构建产物
+```bash
+git tag v1.0.1
+git push origin v1.0.1
+```
 
-1. 进入仓库的 **Actions** 页面
-2. 点击最新的构建记录
-3. 滚动到底部的 **Artifacts** 区域
-4. 下载：
-   - `windows-msi` - MSI 安装包
-   - `windows-nsis` - NSIS 安装程序
+### 下载发布文件
+
+1. 进入仓库的 **Releases** 页面
+2. 打开最新版本
+3. 下载：
+   - `HuaciAI_x.x.x_x64_Portable.zip` - 便携版
+   - `*.msi` - MSI 安装包
+   - `*-setup.exe` - NSIS 安装程序
+
+便携版只包含 `huaci-ai.exe`、`config.json` 和 `使用说明.txt`，不会打包 `启动程序.bat` 或项目 README。
 
 ## 🧪 本地测试
 
@@ -81,9 +86,10 @@ npm run tauri build
 
 ### 方式一：便携模式（推荐）
 
-1. 将 `config.example.json` 复制到程序目录并重命名为 `config.json`
-2. 编辑 `config.json`，填入你的 API Key
-3. 运行程序
+1. 解压 `HuaciAI_x.x.x_x64_Portable.zip`
+2. 双击 `huaci-ai.exe` 启动程序
+3. 右键托盘图标选择「设置」，填入 API Key、模型等配置并保存
+4. 也可以直接编辑程序同目录下的 `config.json`
 
 ### 方式二：标准模式
 
