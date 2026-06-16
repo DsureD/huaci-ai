@@ -43,6 +43,7 @@
   let switching = false; // 工具条→结果框切换中：先隐藏旧帧再显示，期间屏蔽失焦/点外关闭
   let resizeQueued = false;
   let requestSeq = 0;
+  let suppressAutoCloseUntil = 0;
 
   $: renderedHtml = resultText ? (marked.parse(resultText) as string) : '';
 
@@ -70,6 +71,14 @@
       resizeQueued = false;
       resizeToContent();
     });
+  }
+
+  function keepPopupOpenFor(ms = 700) {
+    suppressAutoCloseUntil = Math.max(suppressAutoCloseUntil, Date.now() + ms);
+  }
+
+  function canAutoClose() {
+    return !pinned && !dragging && !switching && Date.now() > suppressAutoCloseUntil;
   }
 
   // 内容变化时重新测量
@@ -142,7 +151,7 @@
 
     // 弹窗不抢焦点，靠后端全局点击：点到窗口之外时通知关闭
     await listen('close-popup', () => {
-      if (!pinned && !dragging && !switching) closeWindow();
+      if (canAutoClose()) closeWindow();
     });
 
     // 失焦自动关闭（用户与弹窗交互、使其获得焦点后才会触发）；钉住或拖动中时保持
@@ -151,12 +160,15 @@
         dragging = false;
         return;
       }
-      if (!pinned && !dragging && !switching) closeWindow();
+      if (canAutoClose()) closeWindow();
     });
 
     // 拖动结束（松开鼠标）后解除屏蔽
     window.addEventListener('mouseup', () => {
-      if (dragging) setTimeout(() => (dragging = false), 150);
+      if (dragging) {
+        keepPopupOpenFor(500);
+        setTimeout(() => (dragging = false), 350);
+      }
     });
 
     // 按 ESC 关闭
@@ -229,6 +241,7 @@
   // 拖动窗口（点在标题栏空白处时）
   function startDrag(e: MouseEvent) {
     if ((e.target as HTMLElement).closest('button')) return;
+    keepPopupOpenFor(1200);
     dragging = true;
     getCurrentWindow().startDragging();
   }
@@ -274,6 +287,7 @@
     copied = false;
     switching = false;
     dragging = false;
+    suppressAutoCloseUntil = 0;
     await invoke('hide_popup');
   }
 </script>
@@ -281,7 +295,7 @@
 {#if isSettings}
   <Settings />
 {:else}
-  <div class="popup" bind:this={rootEl}>
+  <div class="popup" bind:this={rootEl} on:mousedown={() => keepPopupOpenFor()}>
     {#if mode === 'toolbar'}
       <div class="toolbar">
         {#each enabledActions as action, i}
