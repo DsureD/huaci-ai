@@ -103,7 +103,7 @@ pub async fn translate_text(
             content: prompt,
         }],
         temperature: 0.3,
-        max_tokens: 1000,
+        max_tokens: normalize_max_tokens(endpoint.max_tokens),
         stream: false,  // 明确禁用流式响应
     };
 
@@ -144,9 +144,28 @@ pub async fn translate_text(
 
     if let Some(choice) = chat_response.choices.first() {
         if let Some(content) = &choice.message.content {
-            Ok(content.trim().to_string())
+            let trimmed = content.trim();
+            if trimmed.is_empty() {
+                Err(anyhow::anyhow!(
+                    "API 返回空内容{}",
+                    choice
+                        .finish_reason
+                        .as_ref()
+                        .map(|r| format!("，finish_reason={}", r))
+                        .unwrap_or_default()
+                ))
+            } else {
+                Ok(trimmed.to_string())
+            }
         } else {
-            Err(anyhow::anyhow!("API 返回的 message.content 为空"))
+            Err(anyhow::anyhow!(
+                "API 返回的 message.content 为空{}",
+                choice
+                    .finish_reason
+                    .as_ref()
+                    .map(|r| format!("，finish_reason={}", r))
+                    .unwrap_or_default()
+            ))
         }
     } else {
         Err(anyhow::anyhow!("API 返回空 choices 数组"))
@@ -174,4 +193,8 @@ pub fn normalize_timeout(timeout: Duration) -> Duration {
     } else {
         timeout
     }
+}
+
+fn normalize_max_tokens(max_tokens: u32) -> u32 {
+    max_tokens.clamp(1, 200_000)
 }

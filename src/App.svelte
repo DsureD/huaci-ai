@@ -34,10 +34,12 @@
   let loadingStatus = ''; // 加载中的进度提示（故障转移时显示正在请求哪个接口）
   let actions: ActionItem[] = []; // 划词功能项（来自配置）
   let currentAction: ActionItem | null = null;
+  let showCopyButton = true;
   $: enabledActions = actions.filter((a) => a.enabled);
   let rootEl: HTMLElement;
   let pinned = false; // 钉住：不随失焦自动关闭
   let copied = false;
+  let selectedCopied = false;
   let dragging = false; // 拖动中：临时屏蔽失焦关闭
   let popupAnchor: [number, number] = [0, 0]; // 最近一次划词锚点，切换到结果框时复用以原位重显
   let switching = false; // 工具条→结果框切换中：先隐藏旧帧再显示，期间屏蔽失焦/点外关闭
@@ -136,7 +138,8 @@
     await listen<[number, number]>('text-selected', async (event) => {
       const selectionSeq = ++requestSeq;
       try {
-        const [text, , oldClipboard] = await invoke<[string, boolean, string | null]>('get_selected_text');
+        const [text, , oldClipboard, clipboardSequence] =
+          await invoke<[string, boolean, string | null, number | null]>('get_selected_text');
         if (selectionSeq !== requestSeq) return;
         if (!text || text.trim().length === 0) return;
 
@@ -146,6 +149,7 @@
         resultEndpoint = '';
         resultModel = '';
         pinned = false;
+        selectedCopied = false;
 
         const [x, y] = event.payload ?? [0, 0];
         popupAnchor = [x, y];
@@ -154,9 +158,12 @@
         await resizeToContent();
 
         // 延迟 300ms 恢复旧剪贴板(等弹窗稳定后,避免触发终端清空选区)
-        if (oldClipboard) {
+        if (clipboardSequence !== null) {
           setTimeout(() => {
-            invoke('restore_clipboard', { text: oldClipboard }).catch(() => {});
+            invoke('restore_clipboard', {
+              text: oldClipboard,
+              sequence: clipboardSequence,
+            }).catch(() => {});
           }, 300);
         }
 
@@ -200,8 +207,9 @@
 
   async function loadActions() {
     try {
-      const cfg = await invoke<{ actions?: ActionItem[] }>('load_config');
+      const cfg = await invoke<{ app?: { show_copy_button?: boolean }; actions?: ActionItem[] }>('load_config');
       actions = cfg.actions ?? [];
+      showCopyButton = cfg.app?.show_copy_button ?? true;
     } catch (e) {
       console.error('加载功能项失败:', e);
     }
@@ -285,6 +293,17 @@
     }
   }
 
+  async function copySelectedText() {
+    try {
+      keepPopupOpenFor(700);
+      await writeText(selectedText);
+      selectedCopied = true;
+      setTimeout(() => (selectedCopied = false), 1500);
+    } catch (e) {
+      console.error('复制划词文本失败:', e);
+    }
+  }
+
   // 拦截 Markdown 中的链接点击，改用系统浏览器打开，避免 webview 跳转毁掉界面
   function onResultClick(e: MouseEvent) {
     const a = (e.target as HTMLElement).closest('a');
@@ -306,6 +325,7 @@
     loadingStatus = '';
     pinned = false;
     copied = false;
+    selectedCopied = false;
     switching = false;
     dragging = false;
     suppressAutoCloseUntil = 0;
@@ -326,6 +346,13 @@
             {action.name}
           </button>
         {/each}
+        {#if showCopyButton}
+          {#if enabledActions.length}<div class="divider"></div>{/if}
+          <button class="action-btn copy-action" on:click={copySelectedText} title="复制划词文本">
+            <Icon name={selectedCopied ? 'check' : 'copy'} size={16} />
+            复制
+          </button>
+        {/if}
         <button class="close-btn" on:click={closeWindow} aria-label="关闭">×</button>
       </div>
     {:else}

@@ -19,6 +19,8 @@ pub struct Config {
 pub struct AppConfig {
     pub auto_translate: bool,
     pub min_text_length: usize,
+    #[serde(default = "default_true")]
+    pub show_copy_button: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,6 +41,8 @@ pub struct ApiEndpoint {
     pub base_url: String,
     pub api_key: String,
     pub model: String,
+    #[serde(default = "default_max_tokens")]
+    pub max_tokens: u32,
     pub enabled: bool,
     pub priority: u32,
 }
@@ -81,6 +85,14 @@ fn default_prompts() -> PromptConfig {
     }
 }
 
+fn default_max_tokens() -> u32 {
+    1000
+}
+
+fn default_true() -> bool {
+    true
+}
+
 // 全新安装时的默认功能项
 fn default_actions() -> Vec<ActionItem> {
     vec![
@@ -107,6 +119,7 @@ impl Default for Config {
             app: AppConfig {
                 auto_translate: true,
                 min_text_length: 1,
+                show_copy_button: true,
             },
             hotkeys: HotkeyConfig {
                 toggle_capture: "Ctrl+Shift+H".to_string(),
@@ -120,6 +133,7 @@ impl Default for Config {
                         base_url: "https://api.openai.com/v1".to_string(),
                         api_key: "sk-your-api-key-here".to_string(),
                         model: "gpt-4o-mini".to_string(),
+                        max_tokens: default_max_tokens(),
                         enabled: true,
                         priority: 1,
                     },

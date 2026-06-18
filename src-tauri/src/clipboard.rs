@@ -2,20 +2,23 @@ use tauri::AppHandle;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::System::DataExchange::{
-    CloseClipboard, CountClipboardFormats, IsClipboardFormatAvailable, OpenClipboard,
+    CloseClipboard, CountClipboardFormats, GetClipboardSequenceNumber,
+    IsClipboardFormatAvailable, OpenClipboard,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 
 const CF_TEXT_FORMAT: u32 = 1;
 const CF_UNICODETEXT_FORMAT: u32 = 13;
 const CF_HDROP_FORMAT: u32 = 15;
+const COPY_WAIT_ATTEMPTS: usize = 20;
+const COPY_WAIT_INTERVAL_MS: u64 = 20;
 
-// 获取选中文本,返回 (选中的文本, 需要恢复的旧剪贴板内容)
-pub fn get_selected_text(app: &AppHandle) -> anyhow::Result<(String, Option<String>)> {
+// 获取选中文本,返回 (选中的文本, 需要恢复的旧剪贴板内容, 取词后的剪贴板序号)
+pub fn get_selected_text(app: &AppHandle) -> anyhow::Result<(String, Option<String>, Option<u32>)> {
     // 首选 UI Automation：直接读取焦点控件中的选中文本，不触碰剪贴板、不模拟按键，
     // 因此既不污染剪贴板，也不会在终端里触发中断。成功时无需恢复，旧剪贴板返回 None。
     if let Some(text) = crate::uia::get_selected_text_uia() {
-        return Ok((text, None));
+        return Ok((text, None, None));
     }
 
     // 回退：少数不支持 UIA TextPattern 的控件，才退回到模拟 Ctrl+C 取词
@@ -26,7 +29,7 @@ pub fn get_selected_text(app: &AppHandle) -> anyhow::Result<(String, Option<Stri
     if clipboard_has_file_drop_data()
         || (old_clipboard.is_none() && clipboard_has_non_text_data())
     {
-        return Ok((String::new(), None));
+        return Ok((String::new(), None, None));
     }
 
     let sentinel = format!(
@@ -47,8 +50,8 @@ pub fn get_selected_text(app: &AppHandle) -> anyhow::Result<(String, Option<Stri
 
     // 等待剪贴板从哨兵值变为复制结果；多数应用很快完成，少数应用稍慢。
     let mut new_clipboard = None;
-    for _ in 0..10 {
-        std::thread::sleep(std::time::Duration::from_millis(20));
+    for _ in 0..COPY_WAIT_ATTEMPTS {
+        std::thread::sleep(std::time::Duration::from_millis(COPY_WAIT_INTERVAL_MS));
         new_clipboard = app.clipboard().read_text().ok();
         if new_clipboard.as_deref() != Some(sentinel.as_str()) {
             break;
@@ -66,10 +69,14 @@ pub fn get_selected_text(app: &AppHandle) -> anyhow::Result<(String, Option<Stri
     // (立即恢复会触发终端清空选区,需延迟到弹窗显示后)
     if selected_text.is_empty() {
         restore_clipboard_now(app, old_clipboard.as_deref());
-        Ok((String::new(), None))
+        Ok((String::new(), None, None))
     } else {
-        Ok((selected_text, old_clipboard))
+        Ok((selected_text, old_clipboard, Some(clipboard_sequence_number())))
     }
+}
+
+pub fn clipboard_sequence_number() -> u32 {
+    unsafe { GetClipboardSequenceNumber() }
 }
 
 fn clipboard_has_file_drop_data() -> bool {
@@ -167,7 +174,13 @@ fn simulate_ctrl_c() -> anyhow::Result<()> {
             },
         });
 
-        SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+        let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+        if sent != inputs.len() as u32 {
+            return Err(anyhow::anyhow!(
+                "模拟 Ctrl+C 失败，仅发送 {sent}/{} 个输入事件",
+                inputs.len()
+            ));
+        }
     }
 
     Ok(())

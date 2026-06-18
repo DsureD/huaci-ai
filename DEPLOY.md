@@ -43,8 +43,8 @@ GitHub Actions 只在推送 `v*` tag 时自动构建并发布 Release，不再�
 发布版本：
 
 ```bash
-git tag v1.0.2
-git push origin v1.0.2
+git tag v1.0.3
+git push origin v1.0.3
 ```
 
 ### 下载发布文件

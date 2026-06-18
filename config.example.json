@@ -1,7 +1,8 @@
 {
   "app": {
     "auto_translate": true,
-    "min_text_length": 1
+    "min_text_length": 1,
+    "show_copy_button": true
   },
   "hotkeys": {
     "toggle_capture": "Ctrl+Shift+H",
@@ -15,6 +16,7 @@
         "base_url": "https://api.openai.com/v1",
         "api_key": "sk-your-api-key-here",
         "model": "gpt-4o-mini",
+        "max_tokens": 1000,
         "enabled": true,
         "priority": 1
       },
@@ -23,6 +25,7 @@
         "base_url": "https://api.deepseek.com/v1",
         "api_key": "sk-your-api-key-here",
         "model": "deepseek-chat",
+        "max_tokens": 1000,
         "enabled": false,
         "priority": 2
       }

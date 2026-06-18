@@ -34,22 +34,40 @@ struct TranslateProgress {
     endpoint: String,
 }
 
-// 获取选中文本及自动翻译开关状态,返回 (文本, 自动翻译, 旧剪贴板)
+// 获取选中文本及自动翻译开关状态,返回 (文本, 自动翻译, 旧剪贴板, 取词后的剪贴板序号)
 #[tauri::command]
-pub fn get_selected_text(app: AppHandle, state: State<'_, AppState>) -> Result<(String, bool, Option<String>), String> {
-    let (text, old_clipboard) = clipboard::get_selected_text(&app).map_err(|e| e.to_string())?;
+pub fn get_selected_text(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(String, bool, Option<String>, Option<u32>), String> {
+    let (text, old_clipboard, clipboard_sequence) =
+        clipboard::get_selected_text(&app).map_err(|e| e.to_string())?;
     let auto_translate = state.config.lock().unwrap().app.auto_translate;
-    Ok((text, auto_translate, old_clipboard))
+    Ok((text, auto_translate, old_clipboard, clipboard_sequence))
 }
 
-// 恢复剪贴板内容(延迟恢复,避免触发终端清空选区)
+// 恢复剪贴板内容(延迟恢复,避免触发终端清空选区)。
+// 若取词后用户又手动 Ctrl+C，剪贴板序号会变化，此时跳过恢复，避免覆盖用户新复制的内容。
 #[tauri::command]
-pub fn restore_clipboard(app: AppHandle, text: Option<String>) -> Result<(), String> {
+pub fn restore_clipboard(
+    app: AppHandle,
+    text: Option<String>,
+    sequence: Option<u32>,
+) -> Result<bool, String> {
     use tauri_plugin_clipboard_manager::ClipboardExt;
+    if let Some(expected) = sequence {
+        if clipboard::clipboard_sequence_number() != expected {
+            return Ok(false);
+        }
+    }
     if let Some(t) = text {
         app.clipboard().write_text(t).map_err(|e| e.to_string())?;
+    } else {
+        app.clipboard()
+            .write_text(String::new())
+            .map_err(|e| e.to_string())?;
     }
-    Ok(())
+    Ok(true)
 }
 
 // 翻译文本（prompt 为功能项的提示词模板，用 {text} 占位）

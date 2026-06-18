@@ -10,6 +10,7 @@
     base_url: string;
     api_key: string;
     model: string;
+    max_tokens: number;
     enabled: boolean;
     priority: number;
   }
@@ -23,7 +24,7 @@
   }
 
   interface Config {
-    app: { auto_translate: boolean; min_text_length: number };
+    app: { auto_translate: boolean; min_text_length: number; show_copy_button: boolean };
     hotkeys: { toggle_capture: string; manual_translate: string };
     api: { timeout_seconds: number; endpoints: ApiEndpoint[] };
     proxy: { enabled: boolean; host: string; port: number };
@@ -96,6 +97,7 @@
         base_url: 'https://api.openai.com/v1',
         api_key: '',
         model: 'gpt-4o-mini',
+        max_tokens: 1000,
         enabled: true,
         priority: config.api.endpoints.length + 1,
       },
@@ -222,6 +224,10 @@
     saving = true;
     status = '';
     try {
+      config.api.endpoints = config.api.endpoints.map((ep) => ({
+        ...ep,
+        max_tokens: clampNumber(ep.max_tokens, 1, 200000, 1000),
+      }));
       await invoke('save_config', { newConfig: config });
       status = '✓ 已保存';
       await loadHotkeyStatus(); // 保存后已重新注册，刷新快捷键状态
@@ -231,6 +237,12 @@
     } finally {
       saving = false;
     }
+  }
+
+  function clampNumber(value: number, min: number, max: number, fallback: number) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.min(max, Math.max(min, Math.round(n)));
   }
 </script>
 
@@ -331,6 +343,11 @@
                     <span class="model-msg" class:err={modelMsg[i].includes('失败')}>{modelMsg[i]}</span>
                   {/if}
                 </div>
+                <label class="full token-field">
+                  最大输出 Token
+                  <input type="number" bind:value={ep.max_tokens} min="1" max="200000" placeholder="1000" />
+                  <span class="field-hint">长文本结果为空或被截断时可适当调高，最终上限仍取决于模型和接口服务商</span>
+                </label>
               </div>
             </div>
           {/each}
@@ -421,6 +438,10 @@
             <span class="field-label">划词触发的最小字符数</span>
             <input type="number" bind:value={config.app.min_text_length} min="1" />
           </div>
+          <label class="toggle-row copy-toggle">
+            <input type="checkbox" bind:checked={config.app.show_copy_button} />
+            <span>在划词工具条显示复制按钮</span>
+          </label>
           {#each config.actions as act, i}
             <div class="action-item" class:disabled={!act.enabled}>
               <div class="action-head">
@@ -849,6 +870,20 @@
     color: #d32f2f;
   }
 
+  .token-field {
+    align-items: flex-start;
+  }
+
+  .token-field input {
+    max-width: 180px;
+  }
+
+  .field-hint {
+    font-size: 11px;
+    line-height: 1.45;
+    color: #9aa0ac;
+  }
+
   input,
   textarea {
     font-size: 13px;
@@ -883,6 +918,10 @@
     padding-bottom: 16px;
     margin-bottom: 16px;
     border-bottom: 1px solid #f0f1f4;
+  }
+
+  .copy-toggle {
+    margin-bottom: 16px;
   }
 
   .field-row + .field-row,
