@@ -106,6 +106,7 @@
 
   function removeEndpoint(index: number) {
     if (!config) return;
+    if (!window.confirm('删除这个 API 接口？保存后才会写入配置。')) return;
     config.api.endpoints = config.api.endpoints.filter((_, i) => i !== index);
     modelOptions = removeIndexedState(modelOptions, index);
     modelLoading = removeIndexedState(modelLoading, index);
@@ -136,6 +137,7 @@
 
   function removeAction(index: number) {
     if (!config) return;
+    if (!window.confirm('删除这个划词功能？保存后才会写入配置。')) return;
     config.actions = config.actions.filter((_, i) => i !== index);
     iconPickerOpen = removeIndexedState(iconPickerOpen, index);
   }
@@ -169,6 +171,7 @@
     if (!ep.base_url) {
       modelMsg[i] = '请先填写接口地址';
       modelMsg = modelMsg;
+      modelOpen = {};
       return;
     }
     modelLoading[i] = true;
@@ -187,6 +190,7 @@
         modelOpen = { [i]: true }; // 单开：打开本接口列表的同时关闭其它
       } else {
         modelMsg[i] = '接口未返回模型';
+        modelOpen = {};
       }
       modelMsg = modelMsg;
     } catch (e) {
@@ -205,12 +209,28 @@
     modelOpen = {};
   }
 
+  function filteredModels(i: number, query: string) {
+    const list = modelOptions[i] ?? [];
+    const q = (query ?? '').trim().toLowerCase();
+    const exact = q && list.some((m) => m.toLowerCase() === q);
+    const matched = q && !exact ? list.filter((m) => m.toLowerCase().includes(q)) : list;
+    return {
+      items: matched.slice(0, 100),
+      overflow: Math.max(0, matched.length - 100),
+      total: matched.length,
+      filtered: Boolean(q && !exact),
+    };
+  }
+
   // 点击组合框/图标选择器之外时，关闭对应的下拉。
   // 仅在确有打开项时才改状态，避免每次点击（含数字输入框微调）都触发整页重渲染。
+  function anyOpen(o: Record<number, boolean>) {
+    return Object.values(o).some(Boolean);
+  }
+
   function onWindowMouseDown(e: MouseEvent) {
     const t = e.target as HTMLElement | null;
     if (!t) return;
-    const anyOpen = (o: Record<number, boolean>) => Object.values(o).some(Boolean);
     if (anyOpen(modelOpen) && !t.closest('.combo')) {
       modelOpen = {};
     }
@@ -219,15 +239,20 @@
     }
   }
 
+  function onWindowKeyDown(e: KeyboardEvent) {
+    if (e.key !== 'Escape') return;
+    if (!anyOpen(modelOpen) && !anyOpen(iconPickerOpen)) return;
+    modelOpen = {};
+    iconPickerOpen = {};
+    e.stopPropagation();
+  }
+
   async function save() {
     if (!config) return;
     saving = true;
     status = '';
     try {
-      config.api.endpoints = config.api.endpoints.map((ep) => ({
-        ...ep,
-        max_tokens: clampNumber(ep.max_tokens, 1, 200000, 1000),
-      }));
+      normalizeConfigBeforeSave();
       await invoke('save_config', { newConfig: config });
       status = '✓ 已保存';
       await loadHotkeyStatus(); // 保存后已重新注册，刷新快捷键状态
@@ -244,9 +269,22 @@
     if (!Number.isFinite(n)) return fallback;
     return Math.min(max, Math.max(min, Math.round(n)));
   }
+
+  function normalizeConfigBeforeSave() {
+    if (!config) return;
+    config.app.min_text_length = clampNumber(config.app.min_text_length, 1, 1000000, 1);
+    config.app.show_copy_button = Boolean(config.app.show_copy_button);
+    config.api.timeout_seconds = clampNumber(config.api.timeout_seconds, 1, 3600, 30);
+    config.proxy.port = clampNumber(config.proxy.port, 1, 65535, 7890);
+    config.api.endpoints = config.api.endpoints.map((ep, i) => ({
+      ...ep,
+      priority: clampNumber(ep.priority, 1, 1000000, i + 1),
+      max_tokens: clampNumber(ep.max_tokens, 1, 200000, 1000),
+    }));
+  }
 </script>
 
-<svelte:window on:mousedown={onWindowMouseDown} on:focus={loadCaptureStatus} />
+<svelte:window on:mousedown={onWindowMouseDown} on:keydown={onWindowKeyDown} on:focus={loadCaptureStatus} />
 
 <div class="page">
   {#if !config}
@@ -306,6 +344,11 @@
                             modelOpen = { [i]: true };
                           }
                         }}
+                        on:input={() => {
+                          if (modelOptions[i]?.length) {
+                            modelOpen = { [i]: true };
+                          }
+                        }}
                         on:blur={() => {
                           setTimeout(() => {
                             modelOpen = {};
@@ -322,15 +365,22 @@
                         >▾</button>
                       {/if}
                       {#if modelOpen[i] && modelOptions[i]?.length}
+                        {@const modelResult = filteredModels(i, ep.model)}
                         <ul class="combo-list">
-                          {#each modelOptions[i].slice(0, 100) as m}
+                          {#each modelResult.items as m}
                             <li
                               class:active={m === ep.model}
                               on:mousedown|preventDefault={() => pickModel(i, m)}
                             >{m}</li>
                           {/each}
-                          {#if modelOptions[i].length > 100}
-                            <li class="overflow-hint">... 还有 {modelOptions[i].length - 100} 个模型,请输入筛选</li>
+                          {#if modelResult.items.length === 0}
+                            <li class="overflow-hint">未找到匹配模型</li>
+                          {:else if modelResult.overflow > 0}
+                            <li class="overflow-hint">
+                              {modelResult.filtered
+                                ? `... 还有 ${modelResult.overflow} 个匹配模型，请继续输入筛选`
+                                : `... 还有 ${modelResult.overflow} 个模型，输入关键字可筛选`}
+                            </li>
                           {/if}
                         </ul>
                       {/if}
@@ -716,6 +766,8 @@
     color: #444;
     cursor: pointer;
     white-space: nowrap;
+    user-select: none;
+    -webkit-user-select: none;
   }
 
   .switch input {
@@ -983,6 +1035,8 @@
     font-size: 13px;
     color: #2b2f38;
     cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
   }
 
   .toggle-row input {
