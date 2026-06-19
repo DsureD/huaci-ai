@@ -321,10 +321,10 @@
           {#each config.api.endpoints as ep, i}
             <div class="endpoint" class:disabled={!ep.enabled}>
               <div class="endpoint-head">
-                <label class="switch">
-                  <input type="checkbox" bind:checked={ep.enabled} />
+                <div class="switch">
+                  <input type="checkbox" bind:checked={ep.enabled} aria-label="启用接口" />
                   <span>{ep.enabled ? '已启用' : '已禁用'}</span>
-                </label>
+                </div>
                 <button class="remove" on:click={() => removeEndpoint(i)}>删除</button>
               </div>
               <div class="grid">
@@ -416,10 +416,10 @@
           <h2>代理</h2>
         </div>
         <div class="sec-body">
-          <label class="toggle-row">
-            <input type="checkbox" bind:checked={config.proxy.enabled} />
+          <div class="toggle-row">
+            <input type="checkbox" bind:checked={config.proxy.enabled} aria-label="启用 HTTP 代理" />
             <span>启用 HTTP 代理</span>
-          </label>
+          </div>
           {#if config.proxy.enabled}
             <div class="grid">
               <label>主机<input bind:value={config.proxy.host} placeholder="127.0.0.1" /></label>
@@ -488,10 +488,10 @@
             <span class="field-label">划词触发的最小字符数</span>
             <input type="number" bind:value={config.app.min_text_length} min="1" />
           </div>
-          <label class="toggle-row copy-toggle">
-            <input type="checkbox" bind:checked={config.app.show_copy_button} />
+          <div class="toggle-row copy-toggle">
+            <input type="checkbox" bind:checked={config.app.show_copy_button} aria-label="在划词工具条显示复制按钮" />
             <span>在划词工具条显示复制按钮</span>
-          </label>
+          </div>
           {#each config.actions as act, i}
             <div class="action-item" class:disabled={!act.enabled}>
               <div class="action-head">
@@ -506,14 +506,14 @@
                   <Icon name={act.icon} size={18} />
                 </button>
                 <input class="action-name" bind:value={act.name} placeholder="功能名称" />
-                <label class="switch" title="划词选中后自动执行此功能（只能有一个）">
-                  <input type="checkbox" checked={act.auto} on:change={(e) => setAuto(i, e.currentTarget.checked)} />
+                <div class="switch" title="划词选中后自动执行此功能（只能有一个）">
+                  <input type="checkbox" checked={act.auto} aria-label="自动执行" on:change={(e) => setAuto(i, e.currentTarget.checked)} />
                   <span>自动</span>
-                </label>
-                <label class="switch">
-                  <input type="checkbox" bind:checked={act.enabled} />
+                </div>
+                <div class="switch">
+                  <input type="checkbox" bind:checked={act.enabled} aria-label="显示功能" />
                   <span>{act.enabled ? '显示' : '隐藏'}</span>
-                </label>
+                </div>
                 <button class="remove" on:click={() => removeAction(i)}>删除</button>
               </div>
               {#if iconPickerOpen[i]}
@@ -764,7 +764,7 @@
     gap: 6px;
     font-size: 13px;
     color: #444;
-    cursor: pointer;
+    cursor: default;
     white-space: nowrap;
     user-select: none;
     -webkit-user-select: none;
@@ -1029,12 +1029,13 @@
   }
 
   .toggle-row {
+    display: flex;
     flex-direction: row;
     align-items: center;
     gap: 8px;
     font-size: 13px;
     color: #2b2f38;
-    cursor: pointer;
+    cursor: default;
     user-select: none;
     -webkit-user-select: none;
   }

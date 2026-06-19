@@ -135,8 +135,8 @@ GitHub Actions 只在推送 `v*` tag 时自动构建，不再在每次推送 `ma
 发布新版本：
 
 ```bash
-git tag v1.0.4
-git push origin v1.0.4
+git tag v1.0.5
+git push origin v1.0.5
 ```
 
 工作流会自动构建 Windows 版本，并发布 GitHub Release，包含：
