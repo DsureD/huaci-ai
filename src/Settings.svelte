@@ -381,8 +381,12 @@
                   <div class="secret-input">
                     <input
                       type={apiKeyVisible[i] ? 'text' : 'password'}
-                      bind:value={ep.api_key}
+                      value={ep.api_key}
                       placeholder="sk-..."
+                      on:input={(e) => {
+                        ep.api_key = e.currentTarget.value;
+                        config.api.endpoints = config.api.endpoints;
+                      }}
                     />
                     <button
                       type="button"
