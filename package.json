@@ -1,6 +1,6 @@
 {
   "name": "huaci-ai",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "轻量级划词翻译工具",
   "type": "module",
   "scripts": {

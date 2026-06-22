@@ -40,9 +40,11 @@ pub fn get_selected_text(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(String, bool, Option<String>, Option<u32>), String> {
+    let app_config = state.config.lock().unwrap().app.clone();
     let (text, old_clipboard, clipboard_sequence) =
-        clipboard::get_selected_text(&app).map_err(|e| e.to_string())?;
-    let auto_translate = state.config.lock().unwrap().app.auto_translate;
+        clipboard::get_selected_text(&app, app_config.clipboard_fallback_enabled)
+            .map_err(|e| e.to_string())?;
+    let auto_translate = app_config.auto_translate;
     Ok((text, auto_translate, old_clipboard, clipboard_sequence))
 }
 

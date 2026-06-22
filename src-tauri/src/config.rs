@@ -21,6 +21,8 @@ pub struct AppConfig {
     pub min_text_length: usize,
     #[serde(default = "default_true")]
     pub show_copy_button: bool,
+    #[serde(default)]
+    pub clipboard_fallback_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -120,6 +122,7 @@ impl Default for Config {
                 auto_translate: true,
                 min_text_length: 1,
                 show_copy_button: true,
+                clipboard_fallback_enabled: false,
             },
             hotkeys: HotkeyConfig {
                 toggle_capture: "Ctrl+Shift+H".to_string(),

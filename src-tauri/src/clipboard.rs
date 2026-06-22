@@ -14,14 +14,21 @@ const COPY_WAIT_ATTEMPTS: usize = 20;
 const COPY_WAIT_INTERVAL_MS: u64 = 20;
 
 // 获取选中文本,返回 (选中的文本, 需要恢复的旧剪贴板内容, 取词后的剪贴板序号)
-pub fn get_selected_text(app: &AppHandle) -> anyhow::Result<(String, Option<String>, Option<u32>)> {
+pub fn get_selected_text(
+    app: &AppHandle,
+    clipboard_fallback_enabled: bool,
+) -> anyhow::Result<(String, Option<String>, Option<u32>)> {
     // 首选 UI Automation：直接读取焦点控件中的选中文本，不触碰剪贴板、不模拟按键，
     // 因此既不污染剪贴板，也不会在终端里触发中断。成功时无需恢复，旧剪贴板返回 None。
     if let Some(text) = crate::uia::get_selected_text_uia() {
         return Ok((text, None, None));
     }
 
-    // 回退：少数不支持 UIA TextPattern 的控件，才退回到模拟 Ctrl+C 取词
+    if !clipboard_fallback_enabled {
+        return Ok((String::new(), None, None));
+    }
+
+    // 回退：少数不支持 UIA TextPattern 的控件，在用户允许时退回到模拟 Ctrl+C 取词
     // 保存当前剪贴板内容
     let old_clipboard = app.clipboard().read_text().ok();
     // 如果当前剪贴板有文件、图片等非文本内容，不能用文本哨兵覆盖它。

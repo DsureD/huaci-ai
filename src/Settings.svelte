@@ -24,7 +24,12 @@
   }
 
   interface Config {
-    app: { auto_translate: boolean; min_text_length: number; show_copy_button: boolean };
+    app: {
+      auto_translate: boolean;
+      min_text_length: number;
+      show_copy_button: boolean;
+      clipboard_fallback_enabled: boolean;
+    };
     hotkeys: { toggle_capture: string; manual_translate: string };
     api: { timeout_seconds: number; endpoints: ApiEndpoint[] };
     proxy: { enabled: boolean; host: string; port: number };
@@ -42,6 +47,28 @@
   // 划词监听总开关：即时生效的运行时状态，独立于 config，不随「保存」
   let captureEnabled = true; // 默认开启，与后端一致
   let captureBusy = false;
+  let apiKeyVisible: Record<number, boolean> = {};
+
+  interface ConfirmDialog {
+    title: string;
+    message: string;
+    confirmText: string;
+    resolve: (ok: boolean) => void;
+  }
+
+  let confirmDialog: ConfirmDialog | null = null;
+
+  function askConfirm(title: string, message: string, confirmText = '删除') {
+    return new Promise<boolean>((resolve) => {
+      confirmDialog = { title, message, confirmText, resolve };
+    });
+  }
+
+  function closeConfirm(ok: boolean) {
+    const dialog = confirmDialog;
+    confirmDialog = null;
+    dialog?.resolve(ok);
+  }
 
   async function loadHotkeyStatus() {
     try {
@@ -104,14 +131,16 @@
     ];
   }
 
-  function removeEndpoint(index: number) {
+  async function removeEndpoint(index: number) {
     if (!config) return;
-    if (!window.confirm('删除这个 API 接口？保存后才会写入配置。')) return;
+    const confirmed = await askConfirm('删除 API 接口', '删除后需点击保存才会写入配置。');
+    if (!confirmed || !config) return;
     config.api.endpoints = config.api.endpoints.filter((_, i) => i !== index);
     modelOptions = removeIndexedState(modelOptions, index);
     modelLoading = removeIndexedState(modelLoading, index);
     modelMsg = removeIndexedState(modelMsg, index);
     modelOpen = removeIndexedState(modelOpen, index);
+    apiKeyVisible = removeIndexedState(apiKeyVisible, index);
   }
 
   function removeIndexedState<T>(state: Record<number, T>, removedIndex: number) {
@@ -135,9 +164,10 @@
     ];
   }
 
-  function removeAction(index: number) {
+  async function removeAction(index: number) {
     if (!config) return;
-    if (!window.confirm('删除这个划词功能？保存后才会写入配置。')) return;
+    const confirmed = await askConfirm('删除划词功能', '删除后需点击保存才会写入配置。');
+    if (!confirmed || !config) return;
     config.actions = config.actions.filter((_, i) => i !== index);
     iconPickerOpen = removeIndexedState(iconPickerOpen, index);
   }
@@ -186,6 +216,14 @@
       modelOptions[i] = list;
       modelOptions = modelOptions;
       if (list.length) {
+        const currentModel = (ep.model ?? '').trim();
+        const hasMatch = currentModel
+          ? list.some((m) => m.toLowerCase().includes(currentModel.toLowerCase()))
+          : true;
+        if (currentModel === 'gpt-4o-mini' && !hasMatch) {
+          ep.model = '';
+          config.api.endpoints = config.api.endpoints;
+        }
         modelMsg[i] = `找到 ${list.length} 个模型，点击输入框可下拉选择`;
         modelOpen = { [i]: true }; // 单开：打开本接口列表的同时关闭其它
       } else {
@@ -214,11 +252,12 @@
     const q = (query ?? '').trim().toLowerCase();
     const exact = q && list.some((m) => m.toLowerCase() === q);
     const matched = q && !exact ? list.filter((m) => m.toLowerCase().includes(q)) : list;
+    const items = matched.length ? matched : list;
     return {
-      items: matched.slice(0, 100),
-      overflow: Math.max(0, matched.length - 100),
-      total: matched.length,
-      filtered: Boolean(q && !exact),
+      items: items.slice(0, 100),
+      overflow: Math.max(0, items.length - 100),
+      filtered: Boolean(q && !exact && matched.length),
+      unmatched: Boolean(q && !exact && matched.length === 0),
     };
   }
 
@@ -241,6 +280,11 @@
 
   function onWindowKeyDown(e: KeyboardEvent) {
     if (e.key !== 'Escape') return;
+    if (confirmDialog) {
+      closeConfirm(false);
+      e.stopPropagation();
+      return;
+    }
     if (!anyOpen(modelOpen) && !anyOpen(iconPickerOpen)) return;
     modelOpen = {};
     iconPickerOpen = {};
@@ -274,6 +318,7 @@
     if (!config) return;
     config.app.min_text_length = clampNumber(config.app.min_text_length, 1, 1000000, 1);
     config.app.show_copy_button = Boolean(config.app.show_copy_button);
+    config.app.clipboard_fallback_enabled = Boolean(config.app.clipboard_fallback_enabled);
     config.api.timeout_seconds = clampNumber(config.api.timeout_seconds, 1, 3600, 30);
     config.proxy.port = clampNumber(config.proxy.port, 1, 65535, 7890);
     config.api.endpoints = config.api.endpoints.map((ep, i) => ({
@@ -331,7 +376,28 @@
                 <label>名称<input bind:value={ep.name} placeholder="OpenAI" /></label>
                 <label>优先级<input type="number" bind:value={ep.priority} min="1" /></label>
                 <label class="full">接口地址 (Base URL)<input bind:value={ep.base_url} placeholder="https://api.openai.com/v1" /></label>
-                <label class="full">API Key<input type="password" bind:value={ep.api_key} placeholder="sk-..." /></label>
+                <div class="full api-key-field">
+                  <span class="label-text">API Key</span>
+                  <div class="secret-input">
+                    <input
+                      type={apiKeyVisible[i] ? 'text' : 'password'}
+                      bind:value={ep.api_key}
+                      placeholder="sk-..."
+                    />
+                    <button
+                      type="button"
+                      class="secret-toggle"
+                      title={apiKeyVisible[i] ? '隐藏 API Key' : '查看 API Key'}
+                      aria-label={apiKeyVisible[i] ? '隐藏 API Key' : '查看 API Key'}
+                      on:click={() => {
+                        apiKeyVisible[i] = !apiKeyVisible[i];
+                        apiKeyVisible = apiKeyVisible;
+                      }}
+                    >
+                      <Icon name={apiKeyVisible[i] ? 'eye-off' : 'eye'} size={16} />
+                    </button>
+                  </div>
+                </div>
                 <div class="full model-field">
                   <span class="label-text">模型</span>
                   <div class="model-row">
@@ -367,15 +433,16 @@
                       {#if modelOpen[i] && modelOptions[i]?.length}
                         {@const modelResult = filteredModels(i, ep.model)}
                         <ul class="combo-list">
+                          {#if modelResult.unmatched}
+                            <li class="overflow-hint">当前输入未匹配，已显示全部模型</li>
+                          {/if}
                           {#each modelResult.items as m}
                             <li
                               class:active={m === ep.model}
                               on:mousedown|preventDefault={() => pickModel(i, m)}
                             >{m}</li>
                           {/each}
-                          {#if modelResult.items.length === 0}
-                            <li class="overflow-hint">未找到匹配模型</li>
-                          {:else if modelResult.overflow > 0}
+                          {#if modelResult.overflow > 0}
                             <li class="overflow-hint">
                               {modelResult.filtered
                                 ? `... 还有 ${modelResult.overflow} 个匹配模型，请继续输入筛选`
@@ -492,6 +559,14 @@
             <input type="checkbox" bind:checked={config.app.show_copy_button} aria-label="在划词工具条显示复制按钮" />
             <span>在划词工具条显示复制按钮</span>
           </div>
+          <div class="toggle-row fallback-toggle">
+            <input
+              type="checkbox"
+              bind:checked={config.app.clipboard_fallback_enabled}
+              aria-label="UI Automation 取词失败时使用 Ctrl+C 回退"
+            />
+            <span>UIA 取词失败时使用 Ctrl+C 回退</span>
+          </div>
           {#each config.actions as act, i}
             <div class="action-item" class:disabled={!act.enabled}>
               <div class="action-head">
@@ -555,6 +630,27 @@
     </div>
   {/if}
 </div>
+
+{#if confirmDialog}
+  <div class="modal-backdrop" role="presentation" on:mousedown={() => closeConfirm(false)}>
+    <div
+      class="confirm-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="confirm-title"
+      on:mousedown|stopPropagation
+    >
+      <h3 id="confirm-title">{confirmDialog.title}</h3>
+      <p>{confirmDialog.message}</p>
+      <div class="confirm-actions">
+        <button type="button" class="confirm-cancel" on:click={() => closeConfirm(false)}>取消</button>
+        <button type="button" class="confirm-danger" on:click={() => closeConfirm(true)}>
+          {confirmDialog.confirmText}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <style>
   :global(html, body) {
@@ -801,9 +897,46 @@
     gap: 5px;
   }
 
+  .api-key-field {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
   .label-text {
     font-size: 12px;
     color: #6a707c;
+  }
+
+  .secret-input {
+    position: relative;
+    display: flex;
+  }
+
+  .secret-input input {
+    padding-right: 40px;
+  }
+
+  .secret-toggle {
+    position: absolute;
+    right: 1px;
+    top: 1px;
+    bottom: 1px;
+    width: 36px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: #8a909c;
+    border-radius: 0 8px 8px 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .secret-toggle:hover {
+    color: #4f6bed;
+    background: #f4f6ff;
   }
 
   .model-row {
@@ -973,6 +1106,10 @@
   }
 
   .copy-toggle {
+    margin-bottom: 0;
+  }
+
+  .fallback-toggle {
     margin-bottom: 16px;
   }
 
@@ -1309,5 +1446,65 @@
     text-align: center;
     color: #999;
     margin-top: 40px;
+  }
+
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(20, 24, 32, 0.28);
+    box-sizing: border-box;
+  }
+
+  .confirm-dialog {
+    width: min(360px, 100%);
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 16px 44px rgba(0, 0, 0, 0.22);
+    padding: 20px;
+    box-sizing: border-box;
+  }
+
+  .confirm-dialog h3 {
+    margin: 0 0 8px;
+    font-size: 16px;
+    color: #2b2f38;
+  }
+
+  .confirm-dialog p {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.6;
+    color: #6a707c;
+  }
+
+  .confirm-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 18px;
+  }
+
+  .confirm-cancel {
+    background: #f2f3f6;
+    color: #2b2f38;
+  }
+
+  .confirm-cancel:hover {
+    background: #e7e9ef;
+  }
+
+  .confirm-danger {
+    background: #d32f2f;
+    color: #fff;
+    font-weight: 600;
+  }
+
+  .confirm-danger:hover {
+    background: #bd2727;
   }
 </style>

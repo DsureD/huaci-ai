@@ -33,6 +33,8 @@ export const DRAG_ICON =
 
 const ICON_MAP: Record<string, string> = {};
 for (const i of ICONS) ICON_MAP[i.key] = i.path;
+ICON_MAP['eye'] = '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>';
+ICON_MAP['eye-off'] = '<path d="M3 3l18 18"/><path d="M10.6 10.6A2 2 0 0 0 12 14a2 2 0 0 0 1.4-.6"/><path d="M9.9 4.2A10.6 10.6 0 0 1 12 4c6.5 0 10 8 10 8a18.8 18.8 0 0 1-3.2 4.2"/><path d="M6.5 6.5C3.5 8.6 2 12 2 12s3.5 8 10 8a10.2 10.2 0 0 0 4.2-.9"/>';
 
 // 取图标 path；'drag' 取手柄图标；未知 key 回退到通用「星」图标
 export function iconPath(key: string): string {
