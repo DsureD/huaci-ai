@@ -662,11 +662,6 @@
     background: #eef0f4;
   }
 
-  :global(body) {
-    transform: translateZ(0);
-    backface-visibility: hidden;
-  }
-
   :global(body)::-webkit-scrollbar {
     width: 10px;
   }

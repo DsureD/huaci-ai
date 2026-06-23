@@ -1,6 +1,6 @@
 [package]
 name = "huaci-ai"
-version = "1.0.6"
+version = "1.0.7"
 description = "轻量级划词翻译工具"
 authors = ["huaci-ai"]
 edition = "2021"
