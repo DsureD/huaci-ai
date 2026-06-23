@@ -19,6 +19,8 @@ pub struct Config {
 pub struct AppConfig {
     pub auto_translate: bool,
     pub min_text_length: usize,
+    #[serde(default)]
+    pub auto_start: bool,
     #[serde(default = "default_true")]
     pub show_copy_button: bool,
     #[serde(default = "default_true")]
@@ -121,6 +123,7 @@ impl Default for Config {
             app: AppConfig {
                 auto_translate: true,
                 min_text_length: 1,
+                auto_start: false,
                 show_copy_button: true,
                 clipboard_fallback_enabled: true,
             },

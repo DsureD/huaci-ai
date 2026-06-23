@@ -127,6 +127,7 @@ pub fn save_config(
     new_config: config::Config,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    crate::autostart::set_auto_start(new_config.app.auto_start).map_err(|e| e.to_string())?;
     config::save_config(&new_config).map_err(|e| e.to_string())?;
     *state.config.lock().unwrap() = new_config;
     // 通知常驻划词弹窗重新加载功能列表

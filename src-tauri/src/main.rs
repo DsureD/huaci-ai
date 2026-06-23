@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod api_manager;
+mod autostart;
 mod clipboard;
 mod commands;
 mod config;
@@ -61,6 +62,9 @@ fn main() {
         eprintln!("加载配置失败: {}, 使用默认配置", e);
         config::Config::default()
     });
+    if let Err(e) = autostart::set_auto_start(app_config.app.auto_start) {
+        eprintln!("同步开机自启失败: {}", e);
+    }
 
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())

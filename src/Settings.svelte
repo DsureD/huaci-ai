@@ -27,6 +27,7 @@
     app: {
       auto_translate: boolean;
       min_text_length: number;
+      auto_start: boolean;
       show_copy_button: boolean;
       clipboard_fallback_enabled: boolean;
     };
@@ -317,6 +318,7 @@
   function normalizeConfigBeforeSave() {
     if (!config) return;
     config.app.min_text_length = clampNumber(config.app.min_text_length, 1, 1000000, 1);
+    config.app.auto_start = Boolean(config.app.auto_start);
     config.app.show_copy_button = Boolean(config.app.show_copy_button);
     config.app.clipboard_fallback_enabled = Boolean(config.app.clipboard_fallback_enabled);
     config.api.timeout_seconds = clampNumber(config.api.timeout_seconds, 1, 3600, 30);
@@ -521,6 +523,21 @@
           </span>
           <span class="ios-switch" aria-hidden="true"><span class="knob"></span></span>
         </button>
+      </section>
+
+      <section>
+        <div class="sec-head">
+          <h2>启动</h2>
+        </div>
+        <div class="sec-body">
+          <div class="toggle-row startup-toggle">
+            <input type="checkbox" bind:checked={config.app.auto_start} aria-label="开机自启" />
+            <div class="field-label-wrap">
+              <span class="field-label">开机自启</span>
+              <span class="field-sub">便携版移动位置后，重新开启或保存一次即可更新启动路径</span>
+            </div>
+          </div>
+        </div>
       </section>
 
       <section>

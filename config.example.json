@@ -2,6 +2,7 @@
   "app": {
     "auto_translate": true,
     "min_text_length": 1,
+    "auto_start": false,
     "show_copy_button": true,
     "clipboard_fallback_enabled": true
   },
