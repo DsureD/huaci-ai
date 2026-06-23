@@ -3,7 +3,7 @@
     "auto_translate": true,
     "min_text_length": 1,
     "show_copy_button": true,
-    "clipboard_fallback_enabled": false
+    "clipboard_fallback_enabled": true
   },
   "hotkeys": {
     "toggle_capture": "Ctrl+Shift+H",
