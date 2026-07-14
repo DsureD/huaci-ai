@@ -5,10 +5,10 @@
 ---
 ## DEMO
 <p align="center">
-  <img src="assets/demo-01.png" width="25%">
-  <img src="assets/demo-02.png" width="25%">
-  <img src="assets/demo-03.png" width="25%">
-  <img src="assets/demo-04.png" width="25%">
+  <img src="assets/demo-01.png" width="22%">
+  <img src="assets/demo-02.png" width="22%">
+  <img src="assets/demo-03.png" width="22%">
+  <img src="assets/demo-04.png" width="22%">
 </p>
 
 ---
