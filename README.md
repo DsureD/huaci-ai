@@ -2,6 +2,17 @@
 
 轻量级 Windows 划词翻译工具。选中文本后自动调用 OpenAI 兼容接口翻译，并在鼠标附近显示结果。
 
+---
+## DEMO
+<p align="center">
+  <img src="assets/demo-01.png" width="25%">
+  <img src="assets/demo-02.png" width="25%">
+  <img src="assets/demo-03.png" width="25%">
+  <img src="assets/demo-04.png" width="25%">
+</p>
+
+---
+
 ## 功能特性
 
 - 划词自动翻译：在任意应用中选中文本后自动触发翻译
