@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
+  import { listen } from '@tauri-apps/api/event';
   import { getVersion } from '@tauri-apps/api/app';
   import Icon from './Icon.svelte';
   import { ICONS } from './icons';
@@ -101,19 +102,41 @@
     }
   }
 
-  onMount(async () => {
+  async function refreshSettingsView() {
     try {
       config = await invoke<Config>('load_config');
     } catch (e) {
       status = '加载配置失败: ' + e;
     }
-    try {
-      appVersion = await getVersion();
-    } catch {
-      appVersion = '';
-    }
     await loadHotkeyStatus();
     await loadCaptureStatus();
+  }
+
+  onMount(() => {
+    let disposed = false;
+    let unlistenRefresh: (() => void) | null = null;
+
+    (async () => {
+      await refreshSettingsView();
+      try {
+        appVersion = await getVersion();
+      } catch {
+        appVersion = '';
+      }
+      const unlisten = await listen('settings-refresh', () => {
+        refreshSettingsView();
+      });
+      if (disposed) {
+        unlisten();
+      } else {
+        unlistenRefresh = unlisten;
+      }
+    })();
+
+    return () => {
+      disposed = true;
+      unlistenRefresh?.();
+    };
   });
 
   function addEndpoint() {

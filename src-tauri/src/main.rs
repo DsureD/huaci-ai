@@ -6,6 +6,7 @@ mod autostart;
 mod clipboard;
 mod commands;
 mod config;
+mod logger;
 mod mouse_hook;
 mod translator;
 mod uia;
@@ -59,11 +60,11 @@ pub fn sync_capture_state(app: &tauri::AppHandle, enabled: bool) {
 fn main() {
     // 加载配置
     let app_config = config::load_config().unwrap_or_else(|e| {
-        eprintln!("加载配置失败: {}, 使用默认配置", e);
+        logger::log_error(&format!("加载配置失败: {}, 使用默认配置", e));
         config::Config::default()
     });
     if let Err(e) = autostart::set_auto_start(app_config.app.auto_start) {
-        eprintln!("同步开机自启失败: {}", e);
+        logger::log_warn(&format!("同步开机自启失败: {}", e));
     }
 
     tauri::Builder::default()
@@ -83,9 +84,16 @@ fn main() {
             config: Mutex::new(app_config),
         })
         .setup(|app| {
-            // 隐藏主窗口（仅用于划词悬浮翻译）
+            // 隐藏主窗口（仅用于划词悬浮翻译），并拦截意外关闭改为隐藏
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.hide();
+                let win_clone = window.clone();
+                window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        let _ = win_clone.hide();
+                    }
+                });
             }
 
             // 创建托盘菜单
@@ -93,11 +101,24 @@ fn main() {
                 MenuItem::with_id(app, "toggle", "禁用划词监听", true, None::<&str>)?;
             let settings_item =
                 MenuItem::with_id(app, "settings", "设置", true, None::<&str>)?;
+            let repair_item =
+                MenuItem::with_id(app, "repair", "重新加载划词", true, None::<&str>)?;
+            let restart_item =
+                MenuItem::with_id(app, "restart", "重启软件", true, None::<&str>)?;
             let sep = PredefinedMenuItem::separator(app)?;
             let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
 
-            let menu =
-                Menu::with_items(app, &[&toggle_item, &settings_item, &sep, &quit_item])?;
+            let menu = Menu::with_items(
+                app,
+                &[
+                    &toggle_item,
+                    &settings_item,
+                    &repair_item,
+                    &sep,
+                    &restart_item,
+                    &quit_item,
+                ],
+            )?;
 
             // 菜单项存入全局，供托盘 / 快捷键 / 设置页切换捕获时同步文字与图标
             let _ = TOGGLE_MENU_ITEM.set(toggle_item.clone());
@@ -111,9 +132,20 @@ fn main() {
                         let new_state = !mouse_hook::is_capture_enabled();
                         mouse_hook::set_capture_enabled(new_state);
                         sync_capture_state(app, new_state); // 文字 + 图标一起同步
+                        if new_state {
+                            // 重新启用监听时顺便刷新钩子，避免休眠后钩子已失效
+                            mouse_hook::request_hook_reinstall();
+                        }
                     }
                     "settings" => {
-                        let _ = commands::open_settings_window(app);
+                        commands::open_settings_window_async(app);
+                    }
+                    "repair" => {
+                        commands::repair_runtime_async(app);
+                    }
+                    "restart" => {
+                        logger::log_info("用户通过托盘菜单触发重启");
+                        app.restart();
                     }
                     "quit" => {
                         app.exit(0);
@@ -127,7 +159,7 @@ fn main() {
                         ..
                     } = event
                     {
-                        let _ = commands::open_settings_window(tray.app_handle());
+                        commands::open_settings_window_async(tray.app_handle());
                     } else if let TrayIconEvent::Click {
                         button: MouseButton::Right,
                         button_state: MouseButtonState::Up,
@@ -148,13 +180,13 @@ fn main() {
 
             // 安装全局鼠标钩子
             if let Err(e) = mouse_hook::install_mouse_hook(app.handle().clone()) {
-                eprintln!("安装鼠标钩子失败: {}", e);
+                logger::log_error(&format!("安装鼠标钩子失败: {}", e));
             }
 
             // 按配置注册全局快捷键
             commands::apply_hotkeys(app.handle());
 
-            println!("✓ 划词AI 已启动");
+            logger::log_info("✓ 划词AI 已启动");
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -171,6 +203,7 @@ fn main() {
             commands::list_models,
             commands::open_settings,
             commands::get_hotkey_status,
+            commands::popup_heartbeat,
         ])
         .run(tauri::generate_context!())
         .expect("运行 Tauri 应用时出错");

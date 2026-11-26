@@ -1,17 +1,111 @@
-use crate::{api_manager, clipboard, config, mouse_hook, translator};
+use crate::{api_manager, clipboard, config, logger, mouse_hook, translator};
 use serde::Serialize;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
-use std::time::Duration;
-use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, State, WebviewUrl, WebviewWindowBuilder};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tauri::{
+    AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, State, WebviewUrl,
+    WebviewWindow, WebviewWindowBuilder,
+};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 #[cfg(target_os = "windows")]
 use windows::Win32::Foundation::HWND;
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::WindowsAndMessaging::{
-    SetWindowPos, ShowWindow, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SW_HIDE,
-    SW_SHOWNOACTIVATE,
+    IsIconic, IsWindow, SetForegroundWindow, SetWindowPos, ShowWindow, HWND_TOPMOST,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SW_HIDE, SW_RESTORE, SW_SHOWNOACTIVATE,
 };
+
+// 串行化设置窗口的打开/重建，防止快速双击托盘或并发调用造成竞态
+static SETTINGS_WINDOW_LOCK: Mutex<()> = Mutex::new(());
+// 串行化悬浮窗的重建，防止并发重建冲突
+static MAIN_WINDOW_LOCK: Mutex<()> = Mutex::new(());
+// 主悬浮窗（main）前端最近一次心跳时间（毫秒）；用于识别长时间后台后 WebView2 静默死亡
+static MAIN_HEARTBEAT_MS: AtomicU64 = AtomicU64::new(0);
+static MAIN_REBUILDING: AtomicBool = AtomicBool::new(false);
+// 当需要重建被挂起/失联的主窗口后，缓存待处理的划词锚点，前端就绪后补发
+static PENDING_SELECTION: Mutex<Option<(i32, i32)>> = Mutex::new(None);
+// 与前端心跳间隔 30s 配套：超过 120s 无心跳且已经收到过心跳，视为渲染进程疑似挂死
+const MAIN_HEARTBEAT_STALE_MS: u64 = 120_000;
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+// 统一加锁读取配置，防止意外 panic 导致 Mutex 中毒后永久崩盘
+fn lock_config(state: &AppState) -> std::sync::MutexGuard<'_, config::Config> {
+    match state.config.lock() {
+        Ok(g) => g,
+        Err(poisoned) => {
+            logger::log_warn("配置锁发生 poisoned，已自动恢复");
+            poisoned.into_inner()
+        }
+    }
+}
+
+// 判断给定 WebviewWindow 的底层原生窗口句柄是否依然有效
+fn is_window_handle_alive(win: &WebviewWindow) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        match win.hwnd() {
+            Ok(h) if !h.0.is_null() => unsafe { IsWindow(HWND(h.0 as _)).as_bool() },
+            _ => false,
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        win.is_visible().is_ok()
+    }
+}
+
+// 销毁指定窗口并等待 Tauri 释放 label（避免立刻用同 label 重建报 "already exists"）
+fn destroy_and_wait_label_free(app: &AppHandle, label: &str) {
+    if let Some(win) = app.get_webview_window(label) {
+        if let Err(e) = win.destroy() {
+            logger::log_warn(&format!("destroy 窗口 {} 失败: {}", label, e));
+            let _ = win.close();
+        }
+    }
+    for _ in 0..40 {
+        if app.get_webview_window(label).is_none() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    logger::log_warn(&format!("等待窗口 {} 释放超时", label));
+}
+
+// 将一个已存在的设置窗口可靠地带到前台（兼容隐藏 / 最小化 / 失焦状态）
+fn focus_existing_window(win: &WebviewWindow) -> bool {
+    if !is_window_handle_alive(win) {
+        return false;
+    }
+    if win.is_minimized().unwrap_or(false) {
+        let _ = win.unminimize();
+    }
+    if win.show().is_err() {
+        return false;
+    }
+    let _ = win.unminimize();
+    let _ = win.set_focus();
+
+    #[cfg(target_os = "windows")]
+    if let Ok(h) = win.hwnd() {
+        unsafe {
+            let hwnd = HWND(h.0 as _);
+            if IsIconic(hwnd).as_bool() {
+                let _ = ShowWindow(hwnd, SW_RESTORE);
+            }
+            let _ = SetForegroundWindow(hwnd);
+        }
+    }
+
+    true
+}
 
 // 全局配置状态
 pub struct AppState {
@@ -35,15 +129,21 @@ struct TranslateProgress {
 }
 
 // 获取选中文本及自动翻译开关状态,返回 (文本, 自动翻译, 旧剪贴板, 取词后的剪贴板序号)
+// 设为 async + spawn_blocking：避免 UIA/剪贴板轮询在 Windows 上阻塞 Tauri 同步 IPC 线程
 #[tauri::command]
-pub fn get_selected_text(
+pub async fn get_selected_text(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(String, bool, Option<String>, Option<u32>), String> {
-    let app_config = state.config.lock().unwrap().app.clone();
-    let (text, old_clipboard, clipboard_sequence) =
-        clipboard::get_selected_text(&app, app_config.clipboard_fallback_enabled)
-            .map_err(|e| e.to_string())?;
+    let app_config = lock_config(&state).app.clone();
+    let app_clone = app.clone();
+    let fallback_enabled = app_config.clipboard_fallback_enabled;
+    let (text, old_clipboard, clipboard_sequence) = tauri::async_runtime::spawn_blocking(move || {
+        clipboard::get_selected_text(&app_clone, fallback_enabled)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
     let auto_translate = app_config.auto_translate;
     Ok((text, auto_translate, old_clipboard, clipboard_sequence))
 }
@@ -81,10 +181,10 @@ pub async fn translate_text(
     request_id: u64,
     state: State<'_, AppState>,
 ) -> Result<TranslateResult, String> {
-    let config = state.config.lock().unwrap().clone();
+    let config = lock_config(&state).clone();
 
-    // 检查文本长度
-    if text.trim().len() < config.app.min_text_length {
+    // 检查文本长度（按字符数统计，与设置页“最小字符数”一致，避免中文被按字节算成 3 倍）
+    if text.trim().chars().count() < config.app.min_text_length {
         return Err("文本太短".to_string());
     }
 
@@ -129,7 +229,7 @@ pub fn save_config(
 ) -> Result<(), String> {
     crate::autostart::set_auto_start(new_config.app.auto_start).map_err(|e| e.to_string())?;
     config::save_config(&new_config).map_err(|e| e.to_string())?;
-    *state.config.lock().unwrap() = new_config;
+    *lock_config(&state) = new_config;
     // 通知常驻划词弹窗重新加载功能列表
     let _ = app.emit("config-changed", ());
     // 快捷键可能被改动，重新注册
@@ -144,7 +244,7 @@ pub fn apply_hotkeys(app: &AppHandle) {
 
     let hotkeys = {
         let state = app.state::<AppState>();
-        let cfg = state.config.lock().unwrap();
+        let cfg = lock_config(&state);
         cfg.hotkeys.clone()
     };
 
@@ -171,7 +271,7 @@ pub fn get_hotkey_status(app: AppHandle) -> Result<HotkeyStatus, String> {
     let gs = app.global_shortcut();
     let hotkeys = {
         let state = app.state::<AppState>();
-        let cfg = state.config.lock().unwrap();
+        let cfg = lock_config(&state);
         cfg.hotkeys.clone()
     };
     let is_reg = |spec: &str| -> bool {
@@ -189,7 +289,7 @@ pub fn get_hotkey_status(app: AppHandle) -> Result<HotkeyStatus, String> {
 pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut) {
     let hotkeys = {
         let state = app.state::<AppState>();
-        let cfg = state.config.lock().unwrap();
+        let cfg = lock_config(&state);
         cfg.hotkeys.clone()
     };
 
@@ -206,7 +306,11 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut) {
     // 手动翻译：在光标处按划词流程弹出（不受捕获开关限制）
     if let Ok(sc) = Shortcut::from_str(&hotkeys.manual_translate) {
         if shortcut == &sc {
-            let _ = app.emit("text-selected", mouse_hook::cursor_pos());
+            let app_clone = app.clone();
+            let pos = mouse_hook::cursor_pos();
+            std::thread::spawn(move || {
+                trigger_text_selected(&app_clone, pos);
+            });
         }
     }
 }
@@ -214,7 +318,7 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut) {
 // 加载配置
 #[tauri::command]
 pub fn load_config(state: State<'_, AppState>) -> Result<config::Config, String> {
-    Ok(state.config.lock().unwrap().clone())
+    Ok(lock_config(&state).clone())
 }
 
 // 切换划词捕获（设置页开关调用）
@@ -276,6 +380,19 @@ pub fn show_popup(app: AppHandle, x: i32, y: i32) -> Result<(), String> {
         mouse_hook::set_popup_visible(true);
     }
     Ok(())
+}
+
+// 兼容：从托盘强制恢复划词监听与窗口状态（无需完全重启进程即可自愈）
+pub fn repair_runtime_async(app: &AppHandle) {
+    let app_handle = app.clone();
+    std::thread::spawn(move || {
+        logger::log_info("用户触发托盘修复：重装鼠标钩子、重新注册快捷键并重建悬浮窗");
+        mouse_hook::request_hook_reinstall();
+        apply_hotkeys(&app_handle);
+        if let Err(e) = rebuild_main_window_sync(&app_handle) {
+            logger::log_error(&format!("修复时重建划词主窗口失败: {}", e));
+        }
+    });
 }
 
 // 隐藏悬浮翻译窗口
@@ -341,7 +458,7 @@ pub async fn list_models(
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, String> {
     let (proxy, timeout) = {
-        let cfg = state.config.lock().unwrap();
+        let cfg = lock_config(&state);
         (
             cfg.proxy.clone(),
             Duration::from_secs(cfg.api.timeout_seconds),
@@ -353,51 +470,186 @@ pub async fn list_models(
         .map_err(|e| e.to_string())
 }
 
-// 打开（或聚焦）设置窗口
+// 主划词窗口前端定时上报心跳，证明 WebView2 渲染进程存活；
+// 如果之前因 WebView2 失联触发了重建，在前端就绪后补发那次划词坐标。
 #[tauri::command]
-pub fn open_settings(app: AppHandle) -> Result<(), String> {
-    open_settings_window(&app)
+pub fn popup_heartbeat(app: AppHandle) -> Result<(), String> {
+    MAIN_HEARTBEAT_MS.store(now_ms(), Ordering::Relaxed);
+    let pending = PENDING_SELECTION.lock().ok().and_then(|mut g| g.take());
+    if let Some(pos) = pending {
+        let _ = app.emit_to("main", "text-selected", pos);
+    }
+    Ok(())
 }
 
-pub fn open_settings_window(app: &AppHandle) -> Result<(), String> {
-    // 先尝试销毁旧窗口(如果存在但已无效),避免累积
+// 供鼠标钩子 / 全局快捷键调用：触发划词前先校验 main 窗口是否存活，
+// 长时间后台静默后若 WebView2 已异常退出或长期无心跳，自动重建 main 窗口恢复划词。
+pub fn trigger_text_selected(app: &AppHandle, pos: (i32, i32)) {
+    let main_alive = match app.get_webview_window("main") {
+        Some(win) => {
+            if !is_window_handle_alive(&win) {
+                false
+            } else {
+                let last_hb = MAIN_HEARTBEAT_MS.load(Ordering::Relaxed);
+                // 收到过心跳但超时很久未更新，说明 WebView2 渲染进程已挂起或被系统回收
+                !(last_hb > 0 && now_ms().saturating_sub(last_hb) > MAIN_HEARTBEAT_STALE_MS)
+            }
+        }
+        None => false,
+    };
+
+    if main_alive {
+        if let Err(e) = app.emit_to("main", "text-selected", pos) {
+            logger::log_warn(&format!("发送 text-selected 失败，准备重建主窗口: {}", e));
+            rebuild_main_window_async(app, Some(pos));
+        }
+    } else {
+        logger::log_warn("检测到划词悬浮窗(main)已失效或 WebView2 失联，正在自动重建...");
+        rebuild_main_window_async(app, Some(pos));
+    }
+}
+
+fn rebuild_main_window_async(app: &AppHandle, pending_pos: Option<(i32, i32)>) {
+    if let Some(pos) = pending_pos {
+        if let Ok(mut g) = PENDING_SELECTION.lock() {
+            *g = Some(pos);
+        }
+    }
+    if MAIN_REBUILDING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+
+    let app_handle = app.clone();
+    std::thread::spawn(move || {
+        let result = rebuild_main_window_sync(&app_handle);
+        MAIN_REBUILDING.store(false, Ordering::SeqCst);
+        if let Err(e) = result {
+            logger::log_error(&format!("重建划词主窗口失败: {}", e));
+        }
+    });
+}
+
+fn rebuild_main_window_sync(app: &AppHandle) -> Result<(), String> {
+    let _guard = match MAIN_WINDOW_LOCK.lock() {
+        Ok(g) => g,
+        Err(p) => p.into_inner(),
+    };
+
+    mouse_hook::set_popup_visible(false);
+    mouse_hook::set_popup_hwnd(0);
+    MAIN_HEARTBEAT_MS.store(0, Ordering::Relaxed);
+
+    destroy_and_wait_label_free(app, "main");
+
+    let win = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+        .title("划词AI")
+        .inner_size(200.0, 60.0)
+        .resizable(false)
+        .fullscreen(false)
+        .decorations(false)
+        .transparent(true)
+        .shadow(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .visible(false)
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let win_clone = win.clone();
+    win.on_window_event(move |event| {
+        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            let _ = win_clone.hide();
+        }
+    });
+
+    let _ = win.hide();
+    logger::log_info("✓ 划词主窗口(main)已重建完成");
+    Ok(())
+}
+
+// 打开（或聚焦）设置窗口：设为 async 命令，避免在 Windows WebView2 IPC 回调线程直接 build() 触发死锁
+#[tauri::command]
+pub async fn open_settings(app: AppHandle) -> Result<(), String> {
+    let app_clone = app.clone();
+    tauri::async_runtime::spawn_blocking(move || open_settings_window_sync(&app_clone))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+// 供托盘菜单/双击事件调用：脱离主事件循环线程异步执行，避免 Windows 下同步建窗死锁与错误被静默吞掉
+pub fn open_settings_window_async(app: &AppHandle) {
+    let app_handle = app.clone();
+    std::thread::spawn(move || {
+        if let Err(e) = open_settings_window_sync(&app_handle) {
+            logger::log_error(&format!("打开设置窗口失败: {}", e));
+        }
+    });
+}
+
+fn open_settings_window_sync(app: &AppHandle) -> Result<(), String> {
+    let _guard = match SETTINGS_WINDOW_LOCK.lock() {
+        Ok(g) => g,
+        Err(p) => p.into_inner(),
+    };
+
+    // 1. 优先复用已存在的设置窗口（关闭时隐藏而不销毁，彻底避开反复销毁/重建 WebView2 导致的故障）
     if let Some(win) = app.get_webview_window("settings") {
-        // 检查窗口是否仍然有效(可见或可聚焦)
-        if win.is_visible().unwrap_or(false) || win.set_focus().is_ok() {
+        if focus_existing_window(&win) {
             if let Some(icon) = crate::capture_icon(mouse_hook::is_capture_enabled()) {
                 let _ = win.set_icon(icon);
             }
-            let _ = win.show();
-            let _ = win.set_focus();
+            // 通知设置页刷新最新配置、快捷键和监听状态
+            let _ = app.emit_to("settings", "settings-refresh", ());
             return Ok(());
-        } else {
-            // 窗口引用存在但已失效,销毁它
-            let _ = win.close();
         }
+
+        // 窗口对象仍在注册表里但底层 HWND 已失效（例如 WebView2 异常退出），先彻底销毁并等 label 释放
+        logger::log_warn("检测到设置窗口句柄已失效，正在销毁并重建...");
+        destroy_and_wait_label_free(app, "settings");
     }
 
-    let win = WebviewWindowBuilder::new(
+    // 2. 构建设置窗口；如果因为极端竞态导致 label 仍未释放，最多重试一次
+    let win = match build_settings_window(app) {
+        Ok(w) => w,
+        Err(first_err) => {
+            logger::log_warn(&format!("首次创建设置窗口失败({}), 清理后重试", first_err));
+            destroy_and_wait_label_free(app, "settings");
+            build_settings_window(app).map_err(|second_err| {
+                format!("创建设置窗口失败: {} (重试仍失败: {})", first_err, second_err)
+            })?
+        }
+    };
+
+    if let Some(icon) = crate::capture_icon(mouse_hook::is_capture_enabled()) {
+        let _ = win.set_icon(icon);
+    }
+
+    // 拦截关闭事件：改为隐藏而非销毁，避免长期反复创建/销毁 WebView2 实例引发卡死或打不开
+    let win_for_event = win.clone();
+    win.on_window_event(move |event| {
+        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            let _ = win_for_event.hide();
+        }
+    });
+
+    let _ = focus_existing_window(&win);
+    logger::log_info("✓ 设置窗口已打开");
+    Ok(())
+}
+
+fn build_settings_window(app: &AppHandle) -> Result<WebviewWindow, String> {
+    WebviewWindowBuilder::new(
         app,
         "settings",
         WebviewUrl::App("index.html?view=settings".into()),
     )
     .title("划词AI - 设置")
     .inner_size(560.0, 640.0)
+    .min_inner_size(480.0, 520.0)
     .resizable(true)
     .center()
     .build()
-    .map_err(|e| e.to_string())?;
-
-    if let Some(icon) = crate::capture_icon(mouse_hook::is_capture_enabled()) {
-        let _ = win.set_icon(icon);
-    }
-
-    // 监听窗口关闭事件,主动销毁以释放资源
-    let _ = win.on_window_event(|event| {
-        if let tauri::WindowEvent::CloseRequested { .. } = event {
-            // 用户点击关闭时,确保窗口被完全销毁
-        }
-    });
-
-    Ok(())
+    .map_err(|e| e.to_string())
 }

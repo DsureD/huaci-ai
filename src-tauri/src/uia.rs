@@ -5,6 +5,8 @@
 // 仅对支持 UIA TextPattern 的控件有效（现代浏览器、Office、记事本、多数原生/WPF/UWP
 // 控件等）；不支持时返回 None，由调用方回退到 Ctrl+C 方案。
 
+use std::sync::mpsc;
+use std::time::Duration;
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
 };
@@ -12,22 +14,29 @@ use windows::Win32::UI::Accessibility::{
     CUIAutomation, IUIAutomation, IUIAutomationTextPattern, UIA_TextPatternId,
 };
 
-// 读取当前选中文本；取不到（控件不支持 / 无选中）返回 None
+// 某些卡死/无响应的目标程序会让跨进程 UIA COM 调用阻塞数秒甚至更久，
+// 给 UIA 取词加超时上限，避免拖死划词流程。
+const UIA_TIMEOUT_MS: u64 = 400;
+
+// 读取当前选中文本；取不到（控件不支持 / 无选中 / 目标无响应超时）返回 None
 pub fn get_selected_text_uia() -> Option<String> {
+    let (tx, rx) = mpsc::channel();
     // 放到独立的 MTA 线程执行：UIA 属于跨进程 COM 调用，MTA 套间下无需消息泵即可可靠返回，
     // 也避免干扰 Tauri 命令线程已有的 COM 套间设置。
-    std::thread::spawn(|| unsafe {
+    std::thread::spawn(move || unsafe {
         let hr = CoInitializeEx(None, COINIT_MULTITHREADED);
         let text = read_selection().ok().flatten();
         // 仅在本线程确实初始化成功时才反初始化，保持 init/uninit 配对
         if hr.is_ok() {
             CoUninitialize();
         }
-        text
-    })
-    .join()
-    .ok()
-    .flatten()
+        let _ = tx.send(text);
+    });
+
+    match rx.recv_timeout(Duration::from_millis(UIA_TIMEOUT_MS)) {
+        Ok(text) => text,
+        Err(_) => None,
+    }
 }
 
 unsafe fn read_selection() -> windows::core::Result<Option<String>> {

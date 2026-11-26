@@ -114,95 +114,137 @@
     scheduleResizeToContent();
   }
 
-  onMount(async () => {
+  onMount(() => {
     if (isSettings) return;
 
-    const currentWin = getCurrentWindow();
+    let disposed = false;
+    const unlisteners: Array<() => void> = [];
+    let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
-    // 加载划词功能项，并在设置保存后实时重载
-    await loadActions();
-    await listen('config-changed', () => {
-      loadActions();
-    });
+    const sendHeartbeat = () => {
+      invoke('popup_heartbeat').catch(() => {});
+    };
 
-    // 故障转移进度：显示正在请求第几个接口
-    await listen<{ request_id: number; index: number; total: number; endpoint: string }>('translate-progress', (event) => {
-      if (!isLoading) return;
-      const p = event.payload;
-      if (p.request_id !== requestSeq) return;
-      loadingStatus = p.total > 1
-        ? `正在请求 ${p.endpoint}（${p.index}/${p.total}）…`
-        : `正在请求 ${p.endpoint}…`;
-    });
-
-    await listen<[number, number]>('text-selected', async (event) => {
-      const selectionSeq = ++requestSeq;
-      try {
-        const [text, , oldClipboard, clipboardSequence] =
-          await invoke<[string, boolean, string | null, number | null]>('get_selected_text');
-        if (selectionSeq !== requestSeq) return;
-        if (!text || text.trim().length === 0) return;
-
-        selectedText = text;
-        mode = 'toolbar';
-        resultText = '';
-        resultEndpoint = '';
-        resultModel = '';
-        pinned = false;
-        selectedCopied = false;
-
-        const [x, y] = event.payload ?? [0, 0];
-        popupAnchor = [x, y];
-        await invoke('show_popup', { x, y });
-        // 显示后再按内容收紧尺寸 + 钳进屏幕
-        await resizeToContent();
-
-        // 延迟 300ms 恢复旧剪贴板(等弹窗稳定后,避免触发终端清空选区)
-        if (clipboardSequence !== null) {
-          setTimeout(() => {
-            invoke('restore_clipboard', {
-              text: oldClipboard,
-              sequence: clipboardSequence,
-            }).catch(() => {});
-          }, 300);
-        }
-
-        // 若有功能项被标记为「划词后自动执行」，直接运行第一个
-        const autoAction = enabledActions.find((a) => a.auto);
-        if (autoAction) {
-          await doTranslate(autoAction);
-        }
-      } catch (error) {
-        console.error('划词处理失败:', error);
-      }
-    });
-
-    // 弹窗不抢焦点，靠后端全局点击：点到窗口之外时通知关闭
-    await listen('close-popup', () => {
-      if (canAutoClose()) closeWindow();
-    });
-
-    // 失焦自动关闭（用户与弹窗交互、使其获得焦点后才会触发）；钉住或拖动中时保持
-    await currentWin.onFocusChanged(({ payload: focused }) => {
-      if (focused) {
-        dragging = false;
-        return;
-      }
-      if (canAutoClose()) closeWindow();
-    });
-
-    // 拖动结束（松开鼠标）后解除屏蔽
-    window.addEventListener('mouseup', () => {
+    const onMouseUp = () => {
       if (dragging) {
         keepPopupOpenFor(500);
         setTimeout(() => (dragging = false), 350);
       }
-    });
+    };
 
-    // 按 ESC 关闭
-    document.addEventListener('keydown', (e) => {
+    const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') closeWindow();
-    });
+    };
+
+    window.addEventListener('mouseup', onMouseUp);
+    document.addEventListener('keydown', onKeyDown);
+
+    (async () => {
+      const currentWin = getCurrentWindow();
+
+      // 加载划词功能项，并在设置保存后实时重载
+      await loadActions();
+      if (disposed) return;
+
+      unlisteners.push(
+        await listen('config-changed', () => {
+          loadActions();
+        })
+      );
+
+      // 故障转移进度：显示正在请求第几个接口
+      unlisteners.push(
+        await listen<{ request_id: number; index: number; total: number; endpoint: string }>('translate-progress', (event) => {
+          if (!isLoading) return;
+          const p = event.payload;
+          if (p.request_id !== requestSeq) return;
+          loadingStatus = p.total > 1
+            ? `正在请求 ${p.endpoint}（${p.index}/${p.total}）…`
+            : `正在请求 ${p.endpoint}…`;
+        })
+      );
+
+      unlisteners.push(
+        await listen<[number, number]>('text-selected', async (event) => {
+          sendHeartbeat();
+          const selectionSeq = ++requestSeq;
+          try {
+            const [text, , oldClipboard, clipboardSequence] =
+              await invoke<[string, boolean, string | null, number | null]>('get_selected_text');
+            if (selectionSeq !== requestSeq) return;
+            if (!text || text.trim().length === 0) return;
+
+            selectedText = text;
+            mode = 'toolbar';
+            resultText = '';
+            resultEndpoint = '';
+            resultModel = '';
+            pinned = false;
+            selectedCopied = false;
+
+            const [x, y] = event.payload ?? [0, 0];
+            popupAnchor = [x, y];
+            await invoke('show_popup', { x, y });
+            // 显示后再按内容收紧尺寸 + 钳进屏幕
+            await resizeToContent();
+
+            // 延迟 300ms 恢复旧剪贴板(等弹窗稳定后,避免触发终端清空选区)
+            if (clipboardSequence !== null) {
+              setTimeout(() => {
+                invoke('restore_clipboard', {
+                  text: oldClipboard,
+                  sequence: clipboardSequence,
+                }).catch(() => {});
+              }, 300);
+            }
+
+            // 若有功能项被标记为「划词后自动执行」，直接运行第一个
+            const autoAction = enabledActions.find((a) => a.auto);
+            if (autoAction) {
+              await doTranslate(autoAction);
+            }
+          } catch (error) {
+            console.error('划词处理失败:', error);
+          }
+        })
+      );
+
+      // 弹窗不抢焦点，靠后端全局点击：点到窗口之外时通知关闭
+      unlisteners.push(
+        await listen('close-popup', () => {
+          if (canAutoClose()) closeWindow();
+        })
+      );
+
+      // 失焦自动关闭（用户与弹窗交互、使其获得焦点后才会触发）；钉住或拖动中时保持
+      unlisteners.push(
+        await currentWin.onFocusChanged(({ payload: focused }) => {
+          if (focused) {
+            dragging = false;
+            return;
+          }
+          if (canAutoClose()) closeWindow();
+        })
+      );
+
+      if (disposed) {
+        for (const unlisten of unlisteners) unlisten();
+        return;
+      }
+
+      // 所有监听已挂好后立即上报一次心跳，并每 30 秒续报一次，
+      // 供后端识别长时间后台后 WebView2 是否静默退出或冻结并自动重建。
+      sendHeartbeat();
+      heartbeatTimer = setInterval(sendHeartbeat, 30_000);
+    })();
+
+    return () => {
+      disposed = true;
+      if (heartbeatTimer !== null) clearInterval(heartbeatTimer);
+      window.removeEventListener('mouseup', onMouseUp);
+      document.removeEventListener('keydown', onKeyDown);
+      for (const unlisten of unlisteners) unlisten();
+    };
   });
 
   async function loadActions() {

@@ -218,10 +218,16 @@ pub fn load_config() -> anyhow::Result<Config> {
     }
 }
 
-// 保存配置
+// 保存配置（先写临时文件再替换，避免写一半断电/崩溃把 config.json 写空）
 pub fn save_config(config: &Config) -> anyhow::Result<()> {
     let config_path = get_config_path()?;
     let content = serde_json::to_string_pretty(config)?;
-    fs::write(&config_path, content)?;
+    let tmp_path = config_path.with_extension("json.tmp");
+    fs::write(&tmp_path, &content)?;
+    if fs::rename(&tmp_path, &config_path).is_err() {
+        // Windows 上目标文件已存在时 rename 可能失败，回退直接覆盖并清理临时文件
+        fs::write(&config_path, &content)?;
+        let _ = fs::remove_file(&tmp_path);
+    }
     Ok(())
 }
