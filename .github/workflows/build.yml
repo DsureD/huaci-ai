@@ -34,6 +34,10 @@ jobs:
       - name: Install frontend dependencies
         run: npm install
 
+      - name: Sync Rust Tauri dependencies with npm
+        working-directory: src-tauri
+        run: cargo generate-lockfile
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
